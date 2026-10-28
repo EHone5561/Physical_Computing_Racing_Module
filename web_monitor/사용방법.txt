@@ -1,0 +1,126 @@
+PiCar 웹 수동 조작 + SSH 상태 로그
+
+대상
+- 제공된 Adeept WebServer.py / RPIservo.py / Move.py / Ultra.py 구조를 기준으로 작성했다.
+- 실제 라즈베리파이 내부의 프로그램과 버전은 아직 확인하지 않았다.
+- 이 보조 파일은 하드웨어 객체를 새로 만들지 않는다.
+- 웹 조종 프로그램에 추가하여 같은 프로세스에서 사용한다.
+- 단독 실행이나 picar_team/hw.py 동시 실행으로 상태를 확인하는 방식이 아니다.
+
+1. SSH 접속과 실행 파일 확인
+
+노트북 PowerShell 또는 VS Code Remote - SSH에서 실제 계정과 IP로 접속:
+    ssh 실제계정@OLED_IP
+
+접속한 라즈베리파이 터미널에서:
+    pgrep -af 'WebServer.py|APPServer.py'
+    systemctl cat Adeept_Robot.service
+
+위 서비스/파일이 없거나 다른 구조이면 아래 편집을 그대로 적용하지 않는다.
+제공된 소스와 실제 파일의 import, speed_set, scGear 생성 부분을 비교한다.
+
+2. 파일 복사
+
+web_status.py, practice_logger.py, recording.json 세 파일을 실제 실행 중인 WebServer.py와 같은 Server 폴더에 복사한다.
+VS Code Remote - SSH의 원격 폴더에서 같은 이름의 파일을 만들어 내용을 붙여 넣어도 된다.
+노트북 파일만 수정하면 Pi에 자동 반영되지 않는다.
+
+3. 원본 백업과 두 줄 추가
+
+라즈베리파이의 실제 Server 폴더에서, 아직 같은 백업 파일이 없을 때:
+    cp -n WebServer.py WebServer.py.before-web-status
+
+제공된 WebServer.py에는 아래 설정이 있다:
+    functionMode = 0
+    speed_set = 50
+    rad = 0.5
+
+rad 설정 아래, scGear = RPIservo.ServoCtrl()보다 위에 다음 두 줄을 추가한다.
+아래 두 줄은 함수 안이 아닌 파일 최상위이므로 앞에 들여쓰기를 하지 않는다.
+
+import web_status
+web_status.start(RPIservo, move, functions.ultra, lambda: speed_set)
+
+이미 파일 위쪽에서 import RPIservo, import Move as move,
+import Functions as functions를 했는지 확인한다.
+Functions.py의 import Ultra as ultra로 만들어진 기존 센서 객체를 재사용한다.
+별도 DistanceSensor나 ServoCtrl 객체를 추가로 만들 필요가 없다.
+
+4. 적용 및 터미널 보기
+
+웹에서 차량과 팔의 움직임을 멈춘 뒤 서비스를 재시작한다.
+원본의 초기화에 따라 재시작 시 서보들이 초기 자세로 이동할 수 있다.
+실제로 Adeept_Robot.service를 사용하는 것이 확인된 경우에만 실행:
+    sudo systemctl restart Adeept_Robot.service
+    sudo journalctl -u Adeept_Robot.service -f -o cat
+
+웹페이지를 새로 연결하여 수동 조작한다. 약 0.5초마다 [STATE]가 출력된다.
+로그 보기의 Ctrl+C는 로봇을 멈추지 않으며, 로그 보기만 끝낸다.
+수동 조작 중에는 원래 웹 조종 서비스를 켜 둔다.
+picar_team의 모터/서보/센서 시험은 원래 웹 조종을 종료한 뒤 따로 실행한다.
+
+5. 출력 해석
+
+steer_cmd: 조향 서보(채널 0)의 마지막 각도 명령. 실제 바퀴 꺾임각이 아님.
+base_cmd: 베이스 서보(채널 1)의 마지막 각도 명령.
+arm_cmd: 팔 서보(채널 2)의 마지막 각도 명령.
+wrist_cmd: 손목 서보(채널 3)의 마지막 각도 명령.
+grip_cmd: 집게 서보(채널 4)의 마지막 각도 명령.
+speed_setting: 웹의 속도 설정. 정지해도 50처럼 설정값이 남을 수 있음.
+M1_cmd / M2_cmd: 현재 Move 모터 객체의 throttle 명령값. 실제 속도나 RPM이 아님.
+    +0.00은 정지 명령. None은 출력 꺼짐 또는 아직 명령하지 않은 객체.
+distance_cm: 기존 Ultra.checkdist()가 반환한 거리(cm).
+distance_read_age_s: 이 보조 모듈이 값을 읽은 뒤 지난 시간.
+    센서 내부의 실제 샘플 생성 시각이나 최신성을 검증한 값이 아님.
+distance_status:
+    waiting: 아직 거리 값을 받지 못함. 다른 상태 출력은 계속됨.
+    read_ok: 최근에 라이브러리 값을 읽음. 새 에코 수신을 보장하지는 않음.
+    read_delayed: 마지막으로 값을 읽은 지 시간이 지남.
+    error:오류명: 거리 읽기에서 예외 발생. 남아 있는 거리는 이전 성공 값일 수 있음.
+?: 아직 명령이 관찰되지 않았거나 정보를 얻지 못함.
+
+서보의 실제 각도/실제 주행 속도를 측정하는 기능은 없다.
+초음파가 팔과 함께 돌아가는 장착 구조라면 거리는 센서가 향한 방향의 거리다.
+여러 서보/모터와 거리 값은 완전히 같은 순간의 원자적 측정이 아니라 상태 스냅샷이다.
+
+6. 자세 기록
+
+웹으로 목표 자세를 맞추고 조작을 멈춘 뒤 마지막 base_cmd/arm_cmd/wrist_cmd를 기록한다.
+현재 picar_team의 해당 pose에 base/arm/wrist 값으로 옮긴다.
+grip_cmd는 집게 open/close 보정값으로 따로 기록한다.
+이 보조 코드는 config.json을 자동으로 수정하지 않는다.
+
+7. 원래 상태로 돌리기
+
+추가한 import web_status와 web_status.start(...) 두 줄을 제거하고,
+차량/팔이 정지한 상태에서 기존 서비스를 재시작한다.
+WebServer.py를 이후에도 수정했다면 옛 백업을 통째로 덮어쓰지 말고 추가한 두 줄만 제거한다.
+
+8. 시연별 JSON 저장 (추가 기능)
+
+모니터 적용 후 실제 Server 폴더의 SSH 터미널에서:
+    sudo python3 practice_logger.py start --label first-demo
+서버의 시작 확인 응답과 practiceN.json 경로가 나오면 웹으로 시연한다.
+시연 후 먼저 웹에서 로봇을 멈추고:
+    sudo python3 practice_logger.py stop
+다음 start에서 다음 번호의 JSON을 만든다. 기록 중에는 다시 start할 수 없다.
+start/stop은 파일 기록만 제어하며 로봇을 움직이거나 멈추지 않는다.
+제공된 서비스가 root로 실행되어 sudo를 사용한다. 실제 서비스 계정/파일 권한에 맞춘다.
+
+기본 저장 폴더는 Server/practices이며 0.1초 주기 표본과 명령 변경 순간을 기록한다.
+기본 1초마다 JSON을 갱신하고 stop 때 최종 저장한다.
+recording.json에서 directory, interval_s, flush_s를 조정한다.
+directory를 바꾸면 start/stop에도 --directory 같은절대경로 를 전달한다.
+명령은 한 SSH 창에서 응답을 확인하며 순서대로 실행한다.
+서비스를 재시작/종료하기 전에도 stop으로 기록부터 닫는다.
+
+결과 추가 예시(값은 실제 관찰로 교체):
+    sudo python3 practice_logger.py annotate practices/practice1.json --success yes --stop-error-cm -1.2 --notes "실제 관찰 내용"
+성공 여부는 사람이 기록하며, 각도/속도 명령만 보고 자동 판정하지 않는다.
+전체 필드 설명과 수정 내역은 공유본의 picar_team/RECORDING.md를 참고한다.
+
+검증 범위
+- JSON 기록 추가 후 PC의 모의 테스트 15개로 파일 번호, 명령 기록, 저장 오류, 웹 기록 시작/종료 등을 검증했다.
+- 제공된 WebServer.py에 위 두 줄을 추가한 형태의 문법을 메모리에서 확인했다.
+- 제조사 WebServer.py, RPIservo.py 원본은 변경하지 않았다. 팀 코드에는 별도로 JSON 기록을 연결했다.
+- 실제 라즈베리파이 GPIO/I2C/웹서버와 연결한 시험은 수업에서 별도로 해야 한다.

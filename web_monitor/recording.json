@@ -1,0 +1,5 @@
+{
+  "directory": "practices",
+  "interval_s": 0.1,
+  "flush_s": 1.0
+}

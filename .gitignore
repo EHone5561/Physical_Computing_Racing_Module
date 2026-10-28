@@ -1,0 +1,26 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local output and credentials
+logs/
+*.log
+practices/
+.test_tmp/
+.record-request.json
+.record-response.json
+.practice-*.tmp
+.env
+.env.*
+!.env.example
+*.before-web-status
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

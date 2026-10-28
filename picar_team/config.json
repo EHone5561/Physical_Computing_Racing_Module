@@ -1,0 +1,71 @@
+{
+  "verbose": true,
+
+  "recording": {
+    "enabled": true,
+    "directory": "practices",
+    "interval_s": 0.1,
+    "flush_s": 1.0
+  },
+
+  "pca9685_address": 95,
+  "servo_channel": { "steer": 0, "base": 1, "arm": 2, "wrist": 3, "grip": 4 },
+  "servo_pulse_us": [500, 2400],
+  "servo_limits": {
+    "steer": [60, 120], "base": [0, 180], "arm": [0, 180], "wrist": [0, 180], "grip": [0, 180]
+  },
+  "steer_center": 90,
+  "grip": { "open": null, "close": null },
+  "servo_move_time": 0.5,
+  "servo_step_s": 0.02,
+  "grip_wait_s": 0.25,
+
+  "motor": {
+    "channels": { "m1": [15, 14], "m2": [12, 13] },
+    "direction": -1,
+    "max_speed": 50,
+    "slow_speed": 25,
+    "fine_speed": 15,
+    "fine_pulse_s": 0.08,
+    "max_drive_s": 6.0
+  },
+
+  "sonar": { "trig": 23, "echo": 24, "queue_len": 3, "max_distance_m": 2.0 },
+  "stop": {
+    "target_cm": 30.0,
+    "slow_down_cm": 45.0,
+    "brake_margin_cm": 0.0,
+    "tolerance_cm": 0.5,
+    "settle_s": 0.3,
+    "fine_max_tries": 5
+  },
+
+  "camera": { "index": 0, "width": 640, "height": 480 },
+  "start_qr": { "confirm_frames": 2, "require_blank_first": true, "blank_frames": 5 },
+
+  "look": {
+    "retries": 3,
+    "settle_s": 0.2,
+    "front_on_image_left": { "left": false, "right": true },
+    "default_place": { "left": "front", "right": "front" }
+  },
+
+  "poses": {
+    "qr_view":           { "base": null, "arm": null, "wrist": null },
+    "drive":             { "base": null, "arm": null, "wrist": null },
+    "look_left":         { "base": null, "arm": null, "wrist": null },
+    "look_right":        { "base": null, "arm": null, "wrist": null },
+    "left_front_above":  { "base": null, "arm": null, "wrist": null },
+    "left_front_down":   { "base": null, "arm": null, "wrist": null },
+    "left_front_place":  { "base": null, "arm": null, "wrist": null },
+    "left_back_above":   { "base": null, "arm": null, "wrist": null },
+    "left_back_down":    { "base": null, "arm": null, "wrist": null },
+    "left_back_place":   { "base": null, "arm": null, "wrist": null },
+    "right_front_above": { "base": null, "arm": null, "wrist": null },
+    "right_front_down":  { "base": null, "arm": null, "wrist": null },
+    "right_front_place": { "base": null, "arm": null, "wrist": null },
+    "right_back_above":  { "base": null, "arm": null, "wrist": null },
+    "right_back_down":   { "base": null, "arm": null, "wrist": null },
+    "right_back_place":  { "base": null, "arm": null, "wrist": null }
+  }
+}

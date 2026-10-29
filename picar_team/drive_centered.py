@@ -128,6 +128,7 @@ def drive_and_stop_centered(gyro, lines):
 
     d0 = d_prev = hw.get_distance()
     filt = mission.ApproachFilter(d0)
+    slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
     lateral = 0.0
     line_prev = lines.read() if lines else None
     t_start = last_print = time.time()
@@ -147,7 +148,8 @@ def drive_and_stop_centered(gyro, lines):
         steer = steer_for(heading, lateral)
         if abs(steer - hw.servo_angles["steer"]) >= 0.5:   # 작은 변화는 무시 (서보 떨림·기록량 줄이기)
             hw.set_servo("steer", steer, show=False)
-        hw.drive(m["max_speed"] if d > st["slow_down_cm"] else m["slow_speed"])
+        slow = slow or d <= st["slow_down_cm"]
+        hw.drive(m["slow_speed"] if slow else m["max_speed"])
         if lines:
             now = lines.read()
             if now != line_prev:

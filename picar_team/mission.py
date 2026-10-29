@@ -151,12 +151,14 @@ def drive_and_stop():
     t_start = time.time()
     last_print = 0.0
     filt = ApproachFilter(hw.get_distance())
+    slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
     while True:
         d = filt.update(hw.get_distance())
         if d <= brake_at:
             hw.stop()
             break
-        hw.drive(m["max_speed"] if d > st["slow_down_cm"] else m["slow_speed"])
+        slow = slow or d <= st["slow_down_cm"]
+        hw.drive(m["slow_speed"] if slow else m["max_speed"])
         if time.time() - last_print >= 0.1:          # 0.1초마다 속도·거리 출력
             hw.show_status("drive")
             last_print = time.time()

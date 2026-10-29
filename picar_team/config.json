@@ -15,7 +15,7 @@
     "steer": [60, 120], "base": [0, 180], "arm": [0, 180], "wrist": [0, 180], "grip": [0, 180]
   },
   "steer_center": 90,
-  "grip": { "open": 120, "close": 60, "release": 105 },
+  "grip": { "open": 120, "close": 60, "release": 105, "release_wide": 125 },
   "servo_move_time": 0.5,
   "servo_step_s": 0.02,
   "grip_move_s": 0.8,
@@ -62,6 +62,7 @@
     "place_move_s": 0.4,
     "place_settle_s": 0.4,
     "release_hold_s": 0.6,
+    "wide_release": ["right_back"],
     "confirm": true
   },
 
@@ -83,8 +84,8 @@
     "look_right":        { "base": null, "arm": null, "wrist": null },
     "left_front_above":  { "base": null, "arm": null, "wrist": null },
     "left_front_down":   { "base": null, "arm": null, "wrist": null },
-    "left_front_carry":  { "base": 180, "arm": 135, "wrist": 145 },
-    "left_front_place":  { "base": 180, "arm": 160, "wrist": 146 },
+    "left_front_carry":  { "base": 161, "arm": 135, "wrist": 145 },
+    "left_front_place":  { "base": 161, "arm": 160, "wrist": 146 },
     "left_back_above":   { "base": 172, "arm": 132, "wrist": 109 },
     "left_back_down":    { "base": 172, "arm": 165, "wrist": 131 },
     "left_back_carry":   { "base": 172, "arm": 121, "wrist": 115 },

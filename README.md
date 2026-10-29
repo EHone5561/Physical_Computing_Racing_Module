@@ -14,6 +14,9 @@
 │   ├── config.json       # 실험으로 조정할 수치와 하드웨어 설정
 │   ├── hw.py             # 서보·모터·초음파·USB 웹캠 제어와 단독 테스트
 │   ├── mission.py        # 실제 미션 순서와 QR 판별
+│   ├── drive.py          # 미션 1~2만: 출발 QR → 직진 → 정지선 정지
+│   ├── drive_centered.py # drive.py + 자이로 직진 보정, 바닥 센서 기록
+│   ├── run_all.py        # 명령 하나로 전체 미션 (QR → 보정 주행 → 정지 → 스펀지 두 개 옮기기), `arm left|right`로 팔만 시험
 │   ├── practice_logger.py # 시연 JSON 저장과 기록 제어
 │   ├── RECORDING.md      # 저장 구조·사용법·변경 내역
 │   └── tests/test_recording.py # 가짜 장치로 기록 기능 시험
@@ -22,6 +25,8 @@
 │   ├── practice_logger.py # 별도 배포를 위한 동일한 기록기
 │   ├── recording.json    # 웹 기록 폴더와 주기
 │   └── 사용방법.txt      # 실제 웹서버 확인·적용·로그 보기·복구 방법
+├── sim/
+│   └── drive_viewer.html # 주행·팔 동작 3D 시뮬레이터 (브라우저로 열기)
 └── docs/
     └── GITHUB_UPLOAD.md  # 처음 업로드하거나 기존 팀 저장소에 반영하는 방법
 ```
@@ -48,7 +53,7 @@
 8. 반대쪽 PICK 물체를 집어 처음 기억한 PLACE에 놓습니다.
 9. 완료음을 냅니다.
 
-양쪽을 모두 관찰한 뒤 집는 이전 분기는 현재 코드에서 제거되었습니다. `front`는 모니터 쪽 칸, `back`은 출발선 쪽 칸입니다. `left`와 `right`는 주행 방향 기준이며, 카메라 화면의 좌우와 구별해야 합니다. 팔 작업을 위해 차량 자체를 90도 회전시키는 코드가 아니라, 기록한 팔 자세로 좌우 상자를 바라보는 구조입니다.
+대회 물체 배치는 고정입니다(2026-10-28 확인): 왼쪽 상자는 뒤 칸, 오른쪽 상자는 앞 칸에 물체가 있습니다. 그래서 `look.use_qr`를 `false`로 두어 4·6번에서 팔을 돌려 QR을 읽지 않고 `look.default_place`(왼쪽 PLACE = `front`, 오른쪽 PLACE = `back`)를 바로 씁니다. 배치가 바뀌면 `use_qr`를 `true`로 되돌립니다. 양쪽을 모두 관찰한 뒤 집는 이전 분기는 현재 코드에서 제거되었습니다. `front`는 모니터 쪽 칸, `back`은 출발선 쪽 칸입니다. `left`와 `right`는 주행 방향 기준이며, 카메라 화면의 좌우와 구별해야 합니다. 팔 작업을 위해 차량 자체를 90도 회전시키는 코드가 아니라, 기록한 팔 자세로 좌우 상자를 바라보는 구조입니다.
 
 `lock_wheels()`는 이 프로그램 안의 소프트웨어 잠금입니다. 다른 웹 조종 프로그램의 모터 명령까지 막지는 않습니다.
 
@@ -129,14 +134,16 @@ sudo systemctl stop Adeept_Robot.service
 | `steer_center` | 직진 조향 기준 명령 각도 |
 | `grip.open/close` | 집게를 열고 닫는 명령 각도. 현재 미측정 |
 | `poses` | 각 작업 자세의 `base`, `arm`, `wrist` 명령 각도. 현재 미측정 |
-| `servo_move_time`, `servo_step_s`, `grip_wait_s` | 관절 이동과 집게 동작 대기 시간 |
+| `servo_move_time`, `servo_step_s`, `grip_move_s`, `grip_wait_s` | 관절 이동 시간, 집게를 천천히 여닫는 시간(지금은 확실히 집는 것을 우선해 넉넉하게)과 그 뒤 대기 시간 |
 | `motor.direction` | 팀 코드의 전진 명령을 배선 방향에 맞추는 부호. 현재 `-1` |
 | `motor.max_speed/slow_speed/fine_speed` | 접근·감속·미세 보정 출력. 실제 속도 단위가 아님 |
 | `stop` | 목표 거리·감속 거리·보정 허용 오차와 대기 시간 |
 | `sonar.queue_len/max_distance_m` | 초음파 값 평활화 표본 수와 거리 범위 |
 | `camera` | USB 웹캠 번호와 요청 해상도 |
 | `start_qr` | 출발 QR 연속 확인과 이전 QR 대기 조건 |
-| `look` | 상자 QR 판별 시도 수와 화면 좌우를 앞/뒤 칸으로 해석하는 기준 |
+| `centering` | `drive_centered.py`의 자이로 주소·부호, 조향 방향, 보정 세기, 바닥 센서 핀 (22·27·17) |
+| `run_all` | `run_all.py`의 자이로 사용, wrist 방향 반전(`wrist_flip`), 스펀지를 들고 움직이는 시간, 시작 전 확인 |
+| `look` | 상자 QR을 읽을지(`use_qr`), 고정 배치의 PLACE 칸(`default_place`), QR 판별 시도 수와 화면 좌우 해석 기준 |
 | `verbose` | 팀 코드의 상태 로그 출력 여부 |
 | `recording` | 팀 코드의 시연 JSON 저장 여부, 경로, 표본·파일 갱신 주기 |
 
@@ -148,7 +155,7 @@ sudo systemctl stop Adeept_Robot.service
 | --- | --- |
 | `qr_view` | 출발 QR 관찰 |
 | `drive` | 주행 중 팔과 센서 방향 유지 |
-| `look_left`, `look_right` | 좌우 상자 QR 관찰 |
+| `look_left`, `look_right` | 좌우 상자 QR 관찰 (`use_qr`가 `false`면 측정 불필요) |
 | `left/right` + `front/back` + `above` | 해당 상자 위에서 접근·들어 올리기 |
 | `left/right` + `front/back` + `down` | 해당 상자의 스펀지를 집는 위치 |
 | `left/right` + `front/back` + `place` | 해당 상자에 스펀지를 놓는 위치 |

@@ -201,7 +201,7 @@ def init(use_camera=True, recording_mode="manual"):
     # 6) 부저 (Buzzer.py: GPIO18). 실패해도 미션에는 지장 없음
     try:
         from gpiozero import TonalBuzzer
-        buzzer = TonalBuzzer(18)
+        buzzer = TonalBuzzer(18, octaves=2)   # 기본(1옥타브, A3~A5)으로는 C6을 낼 수 없다
     except Exception:
         buzzer = None
 
@@ -282,8 +282,15 @@ def move_servos(target, duration=None):
 
 
 def grip(state):
-    """state = "open" 또는 "close" → cfg["grip"][state] 각도로 집게 이동 후 잠깐 대기"""
-    set_servo("grip", cfg["grip"][state])
+    """state = "open" 또는 "close" → cfg["grip"][state] 각도로 grip_move_s 동안 천천히 움직인 뒤 grip_wait_s 대기.
+    서보는 현재 각도를 알려주지 않으므로 끝까지 열리고·닫히도록 시간을 넉넉히 준다 (성능 개선 때 줄인다).
+    이번 실행에서 집게에 처음 보내는 명령이면 시작 각도를 몰라 바로 보내고, 그만큼 더 기다린다."""
+    target = cfg["grip"][state]
+    if "grip" in servo_angles:
+        move_servos({"grip": target}, cfg["grip_move_s"])
+    else:
+        set_servo("grip", target)
+        time.sleep(cfg["grip_move_s"])
     time.sleep(cfg["grip_wait_s"])
 
 
@@ -391,14 +398,17 @@ def read_qrs(frame):
 # 신호
 # =====================================================================
 def beep():
-    """완료 신호: 짧게 두 번"""
+    """완료 신호: 짧게 두 번. 소리가 안 나도 미션 결과에는 영향을 주지 않는다"""
     if buzzer is None:
         return
-    for _ in range(2):
-        buzzer.play("C6")
-        time.sleep(0.12)
-        buzzer.stop()
-        time.sleep(0.06)
+    try:
+        for _ in range(2):
+            buzzer.play("C6")
+            time.sleep(0.12)
+            buzzer.stop()
+            time.sleep(0.06)
+    except Exception as exc:
+        print(f"[BEEP] 완료음 실패 (무시): {type(exc).__name__}: {exc}", flush=True)
 
 
 # =====================================================================

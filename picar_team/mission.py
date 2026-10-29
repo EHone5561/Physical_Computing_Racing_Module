@@ -6,6 +6,8 @@ mission.py — PiCar의 "머리": 미션 순서와 판단만 둔다.
 - config.json에 null(측정 안 한 값)이 남아 있으면 실행하지 않고 목록만 보여준다
 - 터미널에 매 순간 속도·서보 각도·거리가 출력된다
 """
+from collections import deque
+import statistics
 import time
 
 import hw
@@ -26,6 +28,11 @@ def other_slot(slot):
 def pose(name):
     """config.json의 poses[name] (예: "left_front_down")"""
     return hw.cfg["poses"][name]
+
+
+def pose_ready(name):
+    """poses[name]의 각도가 모두 측정되어 있으면 True"""
+    return all(v is not None for v in pose(name).values())
 
 
 def find_nulls(value, path="config"):
@@ -92,6 +99,34 @@ def wait_start_qr():
             return d
 
 
+class ApproachFilter:
+    """앞으로 다가가는 동안 초음파 값이 튀는 것을 거른다 (진동·반사로 51cm 다음에 71cm 같은 값이 나온다).
+    - 앞으로만 가므로 직전 값보다 jump_cm 넘게 멀어진 값은 버린다. 3번 연속이면 진짜로 보고 받아들인다
+    - 감속·브레이크 판단은 최근 window개 중 가장 가까운 값으로 한다 (늦게 서는 쪽보다 일찍 서는 쪽이 안전)"""
+
+    def __init__(self, first):
+        f = hw.cfg["sonar_filter"]
+        self.jump, self.last, self.rejects = f["jump_cm"], first, 0
+        self.recent = deque([first], maxlen=f["window"])
+
+    def update(self, d):
+        if d > self.last + self.jump and self.rejects < 2:
+            self.rejects += 1
+        else:
+            self.last, self.rejects = d, 0
+            self.recent.append(d)
+        return min(self.recent)
+
+
+def steady_distance(n=5, gap_s=0.03):
+    """멈춘 상태에서 여러 번 재서 중앙값 (튀는 값 하나에 흔들리지 않게)"""
+    values = []
+    for _ in range(n):
+        values.append(hw.get_distance())
+        time.sleep(gap_s)
+    return statistics.median(values)
+
+
 def drive_and_stop():
     """정지선까지 가서 멈춘다. 끝나면 바퀴는 정지 상태."""
     c = hw.cfg
@@ -101,14 +136,19 @@ def drive_and_stop():
     brake_at = target + st["brake_margin_cm"]   # 제동 거리만큼 일찍 브레이크
 
     # 1) 팔을 주행 자세로 (base 정면: 초음파가 같이 돈다 / 팔이 모니터에 닿지 않게)
-    hw.move_servos(pose("drive"))
+    #    아직 측정 전(null)이면 팔은 지금 자세 그대로 둔다 (drive.py 시험 주행용)
+    if pose_ready("drive"):
+        hw.move_servos(pose("drive"))
+    else:
+        log("poses.drive 미측정 → 팔은 현재 자세로 주행")
     hw.set_servo("steer", c["steer_center"])
 
     # 2) 접근: 멀면 빠르게, 가까우면 느리게, 제동 거리에 오면 브레이크
     t_start = time.time()
     last_print = 0.0
+    filt = ApproachFilter(hw.get_distance())
     while True:
-        d = hw.get_distance()
+        d = filt.update(hw.get_distance())
         if d <= brake_at:
             hw.stop()
             break
@@ -122,13 +162,19 @@ def drive_and_stop():
         time.sleep(0.01)
     log(f"브레이크 (거리 {d:.1f}cm)")
     hw.record_event("brake", {"distance_cm": d})
+    fine_adjust()
 
-    # 3) 미세 보정: 멈춘 뒤 다시 재서 허용 오차 밖이면 아주 짧게 전진/후진
-    #    (팔이 움직이기 전이라 규칙상 허용)
+
+def fine_adjust():
+    """미세 보정: 멈춘 뒤 다시 재서 허용 오차 밖이면 아주 짧게 전진/후진
+    (팔이 움직이기 전이라 규칙상 허용). drive_centered.py도 같이 쓴다."""
+    st, m = hw.cfg["stop"], hw.cfg["motor"]
+    target = st["target_cm"]
     hw.set_phase("fine_adjust")
+    d = hw.last_distance
     for _ in range(st["fine_max_tries"]):
         time.sleep(st["settle_s"])
-        d = hw.get_distance()
+        d = steady_distance()
         err = d - target
         hw.show_status("fine")
         if abs(err) <= st["tolerance_cm"]:
@@ -136,7 +182,10 @@ def drive_and_stop():
         hw.drive(m["fine_speed"] if err > 0 else -m["fine_speed"])
         time.sleep(m["fine_pulse_s"])
         hw.stop()
-    log(f"정지 완료 (거리 {hw.last_distance:.1f}cm, 목표 {target}cm)")
+    else:
+        time.sleep(st["settle_s"])   # 마지막 보정 뒤의 위치를 다시 잰다
+        d = steady_distance()
+    log(f"정지 완료 (거리 {d:.1f}cm, 목표 {target}cm)")
 
 
 def look(side):
@@ -145,8 +194,14 @@ def look(side):
       - PLACE, PICK 둘 다 보이면 → 둘의 x좌표 비교 (가장 확실)
       - PLACE만 보이면           → 화면 중앙과 비교
       - PICK만 보이면            → PLACE는 그 반대쪽
+    config "look.use_qr"가 false면 팔을 돌리지 않고 default_place(대회 고정 배치)를 그대로 쓴다.
     """
     lk = hw.cfg["look"]
+    if not lk.get("use_qr", True):
+        slot = lk["default_place"][side]
+        log(f"{side} 상자: PLACE = {slot} (배치 고정, QR 읽지 않음)")
+        hw.record_event("place_fixed", {"side": side, "slot": slot})
+        return slot
     hw.set_phase(f"look_{side}")
     hw.move_servos(pose(f"look_{side}"))
     time.sleep(lk["settle_s"])
@@ -209,6 +264,9 @@ def place(side, slot):
 def main():
     cfg = hw.load_config()
     missing = find_nulls(cfg)
+    if not cfg.get("look", {}).get("use_qr", True):
+        # 배치 고정이면 상자를 보는 자세(look_left/right)는 쓰지 않는다
+        missing = [p for p in missing if not p.startswith(("config.poses.look_left", "config.poses.look_right"))]
     if missing:
         print(f"측정 안 한 값(null)이 {len(missing)}개 있어 실행하지 않습니다:")
         for p in missing:

@@ -1,0 +1,1162 @@
+<title>PiCar 주행 시뮬레이터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: 3D 경기장이 화면 대부분, 오른쪽(좁으면 아래) 계기판 패널 — 실험실 작업대와 측정 노트 */
+:root {
+  --bg: #eef0f2;
+  --panel: #ffffff;
+  --fg: #1d2329;
+  --muted: #5d6873;
+  --line: #d5dade;
+  --accent: #c8322a;      /* 정지선 빨간 테이프 */
+  --tape-yellow: #e9b31c; /* 노란 테이프 */
+  --ok: #23845a;
+  --warn: #8f6200;
+  --bad: #c8322a;
+  --stage: #c9ced3;       /* 3D 배경(바닥 너머) */
+  --chip: #e6e9ec;
+  --on-accent: #ffffff;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15191d; --panel: #1c2227; --fg: #e3e7ea; --muted: #98a3ad; --line: #2e363d;
+    --accent: #ef5a4f; --tape-yellow: #f0c040; --ok: #4cc28a; --warn: #e3a733; --bad: #ef5a4f;
+    --stage: #232a30; --chip: #262d33; --on-accent: #1a0806; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15191d; --panel: #1c2227; --fg: #e3e7ea; --muted: #98a3ad; --line: #2e363d;
+  --accent: #ef5a4f; --tape-yellow: #f0c040; --ok: #4cc28a; --warn: #e3a733; --bad: #ef5a4f;
+  --stage: #232a30; --chip: #262d33; --on-accent: #1a0806; color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; }
+header, aside, .hud, .log, .verdict, textarea { color: var(--fg); }
+.app { height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto minmax(0, 1fr); }
+header {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+header h1 { font-size: 16px; font-weight: 600; margin: 0; text-wrap: balance; }
+header .sub { color: var(--muted); font-size: 12.5px; }
+.stage { position: relative; min-height: 0; background: var(--stage); }
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.views { position: absolute; left: 12px; top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+.hud {
+  position: absolute; left: 12px; bottom: 12px; display: grid; grid-template-columns: repeat(5, auto); gap: 4px 18px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px;
+  font-family: var(--font-data); font-variant-numeric: tabular-nums; pointer-events: none;
+}
+.hud .k { color: var(--muted); font-size: 11px; letter-spacing: .04em; }
+.hud .v { font-size: 15px; font-weight: 500; }
+.hint { position: absolute; right: 12px; bottom: 12px; color: var(--muted); font-size: 12px; pointer-events: none; text-align: right; }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0;
+  padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 18px; }
+section h2 { font-size: 12px; font-weight: 600; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+button, select {
+  font: inherit; font-size: 13px; color: var(--fg); background: var(--chip); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 11px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+button[aria-pressed="true"] { border-color: var(--fg); font-weight: 600; }
+.views button { background: color-mix(in srgb, var(--panel) 90%, transparent); }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-data); font-size: 12px;
+  padding: 3px 9px; border-radius: 999px; background: var(--chip); border: 1px solid var(--line); }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.pill.run::before { background: var(--accent); }
+.pill.ok::before { background: var(--ok); }
+.verdict { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: grid; gap: 4px; }
+.verdict .big { font-size: 17px; font-weight: 600; }
+.verdict .big.ok { color: var(--ok); } .verdict .big.warn { color: var(--warn); } .verdict .big.bad { color: var(--bad); }
+.verdict .small { color: var(--muted); font-size: 12.5px; font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+canvas.chart { width: 100%; height: 150px; display: block; border: 1px solid var(--line); border-radius: 8px; }
+canvas.strip { width: 100%; height: 84px; display: block; border: 1px solid var(--line); border-radius: 8px; }
+.log { font-family: var(--font-data); font-size: 11.5px; line-height: 1.55; background: var(--chip); border-radius: 8px;
+  padding: 8px 10px; max-height: 150px; overflow: auto; white-space: pre; }
+.params { display: grid; gap: 7px; }
+.param { display: grid; grid-template-columns: minmax(0, 1fr) 62px; gap: 2px 10px; align-items: center; }
+.param label { font-size: 12.5px; min-width: 0; }
+.param label code { font-family: var(--font-data); font-size: 11px; color: var(--muted); }
+.param output { font-family: var(--font-data); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+.param input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 0; }
+.note { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 6px 0 0; }
+textarea { width: 100%; box-sizing: border-box; font-family: var(--font-data); font-size: 11.5px; background: var(--chip);
+  color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; resize: vertical; height: 150px; }
+.counts { font-family: var(--font-data); font-size: 12px; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+@media (max-width: 820px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 56vh auto; height: auto; }
+  aside { border-left: 0; border-top: 1px solid var(--line); overflow: visible;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .hud { grid-template-columns: repeat(2, auto); }
+  .hint { display: none; }
+}
+</style>
+
+<div class="app">
+  <header>
+    <h1>PiCar 주행 시뮬레이터</h1>
+    <span class="sub">drive.py · 미션 1~2 (출발 QR → 직진 → 모니터 30cm 앞 정지)</span>
+    <span id="phase" class="pill">대기</span>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="views" role="group" aria-label="시점">
+      <button id="view-orbit" aria-pressed="true">전체</button>
+      <button id="view-top">위에서</button>
+      <button id="view-side">옆에서</button>
+      <button id="view-chase">따라가기</button>
+    </div>
+    <div class="hud" aria-live="off">
+      <div><div class="k">시각</div><div class="v" id="h-time">0.00s</div></div>
+      <div><div class="k">센서 실제 거리</div><div class="v" id="h-true">87.0cm</div></div>
+      <div><div class="k">초음파 값</div><div class="v" id="h-sonar">-</div></div>
+      <div><div class="k">속도 명령</div><div class="v" id="h-cmd">+0</div></div>
+      <div><div class="k">출발 QR 시야</div><div class="v" id="h-qr">-</div></div>
+    </div>
+    <div class="hint">드래그: 360° 회전 · 휠: 확대 · 오른쪽 드래그: 이동</div>
+  </div>
+
+  <aside>
+    <section>
+      <h2>시연</h2>
+      <div class="row">
+        <button class="primary" id="btn-start">시작 버튼</button>
+        <button id="btn-reset">처음으로</button>
+        <select id="sel-dir" aria-label="출발 QR">
+          <option value="random">QR 무작위</option>
+          <option value="left">LEFT</option>
+          <option value="right">RIGHT</option>
+        </select>
+        <select id="sel-rate" aria-label="재생 속도">
+          <option value="0.25">0.25배</option>
+          <option value="0.5">0.5배</option>
+          <option value="1" selected>1배</option>
+          <option value="2">2배</option>
+        </select>
+      </div>
+      <p class="note">시작 버튼을 누르면 5초 뒤 모니터에 QR이 뜹니다. 로봇은 QR을 2프레임 연속 읽은 뒤 출발합니다.</p>
+    </section>
+
+    <section>
+      <h2>결과</h2>
+      <div class="verdict">
+        <div class="big" id="v-main">아직 주행 전</div>
+        <div class="small" id="v-detail">정지 후 센서 위치로 판정합니다 (빨강 29~31cm, 노랑 27~33cm)</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>거리 기록</h2>
+      <canvas class="chart" id="chart" aria-label="시간에 따른 거리 그래프"></canvas>
+      <p class="note">실선은 센서의 실제 위치, 점선은 초음파 값입니다. 띠는 노랑·빨강 정지선입니다.</p>
+    </section>
+
+    <section>
+      <h2>터미널 출력</h2>
+      <div class="log" id="log"></div>
+    </section>
+
+    <section>
+      <h2>반복 시험</h2>
+      <div class="row"><button id="btn-batch">같은 설정으로 30회</button></div>
+      <canvas class="strip" id="strip" aria-label="반복 시험 정지 위치 분포"></canvas>
+      <div class="counts" id="counts"></div>
+    </section>
+
+    <section>
+      <h2>config.json 값</h2>
+      <div class="params" id="params-cfg"></div>
+    </section>
+
+    <section>
+      <h2>팔 자세 (poses.qr_view · drive)</h2>
+      <div class="params" id="params-pose"></div>
+      <div class="row" style="margin-top:8px">
+        <select id="sel-wristdir" aria-label="wrist 서보 방향">
+          <option value="dec-down">값을 내리면 목이 내려감</option>
+          <option value="inc-down">값을 올리면 목이 내려감</option>
+        </select>
+        <select id="sel-boxqr" aria-label="상자 QR 읽기">
+          <option value="fixed">상자 QR 안 읽음 (배치 고정)</option>
+          <option value="read">상자 QR 읽음</option>
+        </select>
+      </div>
+      <p class="note">대회 배치는 고정입니다(왼쪽 물체 뒤 칸, 오른쪽 물체 앞 칸). base·arm·grip은 90°로 둡니다. 서보 90°일 때 목은 수평보다 약 10° 아래입니다 (서보를 다시 끼운 기준). 계기판의 "출발 QR 시야"가 초록이면 출발선에서 QR이 보입니다.</p>
+    </section>
+
+    <section>
+      <h2>로봇 물리 가정값</h2>
+      <div class="params" id="params-phys"></div>
+      <p class="note">실측 전 추정치입니다. <code>python3 hw.py motor 30 1.0</code>으로 이동 거리를 재면 속도와 제동을 맞출 수 있습니다.</p>
+    </section>
+
+    <section>
+      <h2>config.json에 붙여넣기</h2>
+      <textarea id="cfg-out" readonly aria-label="config.json 조각"></textarea>
+      <div class="row" style="margin-top:6px"><button id="btn-copy">복사</button><span class="note" id="copy-msg"></span></div>
+    </section>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+"use strict";
+const QR_IMG = {
+  left: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAOgAAADoCAAAAADAwvekAAAB5UlEQVR42u3dy26EMAwF0MmI//9lZgWaRSTXzoNWPV6nKUd4cWUC015T64wWtMQObeaVvV//pEBBQUFBQUFBQa86Ukk1k19btG/mv41fmdYFBQUFBQUFBe1GwDDWZULZGaXBVtu3eGVaFxQUFBQUFBQ0ioCrKpwNuqOgoKCgoKCgoH83ArbagtMdBQUFBQUFBQV9KAKOJ7HMg+ANxwK1LigoKCgoKChoJ4fNqGLuyxwWdEdBQUFBQUFBQUcj4I4TeY8dANS6oKCgoKCgoKCdOr5HbVNneKsyYri2v0DrgoKCgoKCgoLeEXDCWK74fZjx7JmJlloXFBQUFBQUFPSOgBPC3obZYHGB1gUFBQUFBQUFTaSovU9/M9dQTKRaFxQUFBQUFBT0qhnfBcw83M2EvakfDtS6oKCgoKCgoKB3zFr2iu74T8yNHwA0BQQFBQUFBQUFrQS1XP2yN4K1LigoKCgoKCholJdWBbip47zin2ldUFBQUFBQUNCrjp9Ew15lpnVhPmvD+4bZU+uCgoKCgoKCgkYRcLyKT3RX/Z6w1gUFBQUFBQUFXR8B29YdwuSodUFBQUFBQUFBuzFrw8scmYQ3/lkZU0BQUFBQUFBQ0EoOy9VZ27kY9jIOrQsKCgoKCgoKetUHDz5Q2uHdLZ0AAAAASUVORK5CYII=",
+  right: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAOgAAADoCAAAAADAwvekAAAB70lEQVR42u3dO47DMAwFQGvh+1/ZWzmVAFoklQTIsAzy8cAsHmhJGUdrXdNXR+4bRueV/R0/UqCgoKCgoKCgoHedcVINa+QC7pV7b/LKtC4oKCgoKCgo6DQCJgNcMuGNXMJLXpnWBQUFBQUFBQWNImBrhc/Bk2nQHQUFBQUFBQUF/a4IGMa6XcsbtS4oKCgoKCgoaC4C1odxu8Z5lzsKCgoKCgoKCtoYAVuHcfMp4K4FgO4oKCgoKCgoKOjzbHV97qenr1oLCAoKCgoKCgr61hwWTut2TfZaPzZ/g9YFBQUFBQUFBX3lpTh9rUzrkqdd18OeOwoKCgoKCgoK+rg6dgTXD4Geh7167tO6oKCgoKCgoKBRoKrP5Y7Ob2jdOqJ1QUFBQUFBQUHvWtsRHI7zkisEW987vwatCwoKCgoKCgr6CknbdgSHW0dWkmN9/Kh1QUFBQUFBQUHvOnv/mCNcyZcMkfWUqXVBQUFBQUFBQad56b3r+1byZP0MQa0LCgoKCgoKCnrXmY1qybC38sh3dP6w1gUFBQUFBQUFjSJgvZIzvPBjyZyqdUFBQUFBQUFB90fAlRMAk+cCrowUtS4oKCgoKCgo6DSofdlZf/UHwaaAoKCgoKCgoKCPY1a6Ws8FbN06onVBQUFBQUFBQe/6BytTT9+EUeukAAAAAElFTkSuQmCC",
+};
+
+// ---------------- 경기장 규격 (PiCar.pdf, cm) ----------------
+// z = 0: 모니터 전면(경기장 끝). 로봇은 +z에서 -z로 달린다. 로봇 기준 왼쪽 = -x
+// 노트북은 경기장 위에 놓인다: 화면(모니터 전면)이 경기장 끝 z = 0에 서고, 키보드가 z 0~22를 덮는다.
+// 그래서 키보드 앞 모서리는 정지선 중심에서 약 8cm 앞이다 (경기장 사진 기준)
+const SPONGE = { len: 7, h: 10, thick: 2 };   // 얇고 세로로 긴 스펀지를 세워 둠
+const FIELD = { w: 39.4, len: 109, sheet: 54.5, startZ: 109 - 22, stopZ: 30, red: 2, yellow: 2, boxW: 15, boxHalf: 10, laptopDepth: 22 };
+// Adeept PiCar Pro V2: 공개 조립 크기 25 × 21 × 12cm(길이 × 폭 × 높이)에 경기장 사진 비율을 맞춘 값.
+// 기준점(z 0) = 초음파 센서 앞면, +z = 차체 뒤쪽. 센서·바퀴 위치는 사진 추정(±1cm)
+const CAR = {
+  len: 25, width: 21, tyreR: 3.3, tyreW: 4,
+  frontAxle: 6.7, wheelbase: 15,   // 앞바퀴 축은 센서 뒤 6.7cm, 앞뒤 축 간격 15cm
+  plateW: 13, baseZ: 3, sensorY: 14,   // 초음파: 팔 베이스 앞, 바닥에서 약 14cm
+  // 서보 초기화 자세의 팔 (측면 사진 추정, 배율 1 기준). base 회전축 z 4, 어깨 높이 15,
+  // 어깨 → 목: 위로 11.5, 앞으로 5 (한 덩어리로 움직임). 목 → 집게 끝 9.5. 웹캠: 목 위 3.2, 뒤 0.5
+  arm: { pivotZ: 4, shoulderY: 15, up: 11.5, fwd: 5, grip: 9.5, cam: [3.2, 0.5] },
+};
+const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+const QR_CENTER_Y = 11.5, QR_HALF = 7.5;   // 화면 위 출발 QR 중심 높이, QR 반 크기 (15cm)
+// 웹캠 위치·방향 (차량 좌표, 목 각도 deg)와 출발 QR이 시야에 들어오는지
+function camPose(neckDeg, k = 1) {
+  const t = rad(neckDeg), A = CAR.arm, [a, b] = A.cam;
+  return { y: A.shoulderY + k * (A.up + a * Math.cos(t) - b * Math.sin(t)), z: A.pivotZ - k * (A.fwd - a * Math.sin(t) - b * Math.cos(t)) };
+}
+function qrView(neckDeg, vfov, carZ, k = 1) {
+  const c = camPose(neckDeg, k), D = carZ + c.z;
+  const deg = r => r * 180 / Math.PI;
+  const off = deg(Math.atan2(QR_CENTER_Y - c.y, D)) - neckDeg;   // 음수 = 카메라 중심보다 아래
+  const visible = Math.abs(off) + deg(Math.atan2(QR_HALF, D)) <= vfov / 2;
+  return { off, visible };
+}
+CAR.wheelFront = CAR.frontAxle - CAR.tyreR;   // 앞바퀴 앞 끝 = 센서 뒤 3.4cm
+
+// ---------------- 파라미터 ----------------
+const CFG = [
+  ["max_speed", "motor.max_speed", "멀 때 속도 %", 10, 100, 1, 45],
+  ["slow_speed", "motor.slow_speed", "가까울 때 속도 %", 5, 60, 1, 20],
+  ["slow_down_cm", "stop.slow_down_cm", "감속 시작 거리 cm", 32, 80, 1, 60],
+  ["target_cm", "stop.target_cm", "목표 거리 cm", 25, 35, 0.1, 29.7],
+  ["brake_margin_cm", "stop.brake_margin_cm", "일찍 브레이크 cm", 0, 6, 0.1, 2],
+  ["tolerance_cm", "stop.tolerance_cm", "허용 오차 cm", 0.1, 2, 0.1, 0.5],
+  ["settle_s", "stop.settle_s", "정지 후 대기 s", 0.1, 1, 0.05, 0.3],
+  ["fine_max_tries", "stop.fine_max_tries", "미세 보정 횟수", 0, 10, 1, 6],
+  ["fine_speed", "motor.fine_speed", "미세 보정 속도 %", 5, 40, 1, 25],
+  ["fine_pulse_s", "motor.fine_pulse_s", "미세 보정 펄스 s", 0.02, 0.3, 0.01, 0.2],
+  ["max_drive_s", "motor.max_drive_s", "주행 시간 제한 s", 2, 15, 0.5, 12],
+  ["grip_move_s", "grip_move_s", "집게 여닫는 시간 s", 0, 2, 0.05, 0.8],
+  ["grip_wait_s", "grip_wait_s", "집게 동작 후 대기 s", 0, 1.5, 0.05, 0.5],
+];
+const PHYS = [
+  ["vmax", null, "100% 출력 속도 cm/s", 20, 150, 5, 60],
+  ["brake", null, "제동 감속 cm/s²", 50, 600, 10, 200],
+  ["tau", null, "가속 시간상수 s", 0.03, 0.5, 0.01, 0.15],
+  ["sonarInterval", null, "초음파 측정 간격 s", 0.02, 0.15, 0.01, 0.06],
+  ["noise", null, "초음파 잡음 cm", 0, 2, 0.1, 0.3],
+  ["offset", null, "반사면 오프셋 cm", -5, 25, 0.5, 0],
+  ["heading", null, "직진 방향 오차 °", -5, 5, 0.5, 0],
+  ["qrLatency", null, "QR 인식 지연 s", 0, 1, 0.05, 0.2],
+  ["camVfov", null, "웹캠 상하 화각 °", 30, 80, 1, 45],
+  ["armScale", null, "팔 길이 배율 (사진 원근 보정)", 0.8, 1.5, 0.05, 1.2],
+  ["reachOut", null, "집을 때 목표 바깥쪽 보정 cm (실물이 덜 뻗음)", -3, 5, 0.5, 1],
+  ["carryBottom", null, "옮길 때 스펀지 바닥 높이 cm", 8, 18, 0.5, 12],
+];
+const POSE = [
+  ["wristServo", "poses.*.wrist", "wrist(목) 서보 값 °", 0, 180, 1, 90],
+];
+const NECK_AT_90 = -10;  // 서보 90°일 때 목 각도 (수평 기준 위 +). 서보를 다시 끼워 90 = 약 10° 아래 (처음 조립은 +18)
+const P = {};
+function buildParams(list, host) {
+  for (const [key, cfgName, label, min, max, step, def] of list) {
+    P[key] = def;
+    const wrap = document.createElement("div");
+    wrap.className = "param";
+    const id = "p-" + key;
+    wrap.innerHTML = `<label for="${id}">${label}${cfgName ? ` <code>${cfgName}</code>` : ""}</label>` +
+      `<output id="${id}-o"></output><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${def}">`;
+    host.appendChild(wrap);
+    const input = wrap.querySelector("input"), out = wrap.querySelector("output");
+    const show = () => { out.textContent = (+input.value).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0); };
+    input.addEventListener("input", () => { P[key] = +input.value; show(); writeConfig(); if (key === "wristServo") updateNeck(); });
+    show();
+  }
+}
+
+// ---------------- 시뮬레이션 (drive.py / mission.drive_and_stop 그대로) ----------------
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// ref: 기준 거리, minZ: 주행 중 가장 깊이 들어간 위치 (한 번이라도 정지선을 넘으면 실격)
+// ---------------- 팔 운동학 ----------------
+// 각도는 실제 기하 각도: yaw = base 회전(왼쪽 +), sh = arm 어깨(앞으로 숙이면 +),
+// neck = 목(어깨 마디 기준, 위 +), grip = 0 열림 ~ 1 완전히 닫힘
+function armLinks(k) { const A = CAR.arm; return { L1: k * Math.hypot(A.up, A.fwd), L2: k * A.grip, a0: deg(Math.atan2(A.fwd, A.up)) }; }
+function armTip(arm, k) {   // 차량 좌표계 집게 끝
+  const { L1, L2, a0 } = armLinks(k), A = CAR.arm;
+  const al = rad(a0 + arm.sh), ph = rad(arm.neck - arm.sh);
+  const r = L1 * Math.sin(al) + L2 * Math.cos(ph);
+  return { x: -Math.sin(rad(arm.yaw)) * r, y: A.shoulderY + L1 * Math.cos(al) + L2 * Math.sin(ph), z: A.pivotZ - Math.cos(rad(arm.yaw)) * r };
+}
+// 집게 끝을 차량 좌표 T에 두는 자세. 집게는 되도록 60° 아래를 향한다. 닿지 않으면 null
+function armIK(T, k) {
+  const { L1, L2, a0 } = armLinks(k), A = CAR.arm;
+  const yaw = deg(Math.atan2(-T.x, -(T.z - A.pivotZ))), r = Math.hypot(T.x, T.z - A.pivotZ), h = T.y - A.shoulderY;
+  const f = p => Math.hypot(r - L2 * Math.cos(rad(p)), h - L2 * Math.sin(rad(p))) - L1;
+  let best = null;
+  for (let p = -100; p < 40; p += 1) {
+    if (Math.sign(f(p)) === Math.sign(f(p + 1))) continue;
+    let lo = p, hi = p + 1;
+    for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (Math.sign(f(m)) === Math.sign(f(lo))) lo = m; else hi = m; }
+    if (best === null || Math.abs(lo + 60) < Math.abs(best + 60)) best = lo;
+  }
+  if (best === null) return { short: Math.hypot(r, h) - L1 - L2 };
+  const sh = deg(Math.atan2(r - L2 * Math.cos(rad(best)), h - L2 * Math.sin(rad(best)))) - a0;
+  return { yaw, sh, neck: best + sh };
+}
+// 기하 각도 → 서보 값 (1° = 1° 가정). base는 값이 커지면 왼쪽(WebServer lookleft),
+// arm은 값이 커지면 숙임(armdown), wrist는 선택한 방향
+function armServos(arm, wristSign) {
+  return { base: 90 + arm.yaw, arm: 90 + arm.sh, wrist: 90 + (arm.neck - NECK_AT_90) / wristSign };
+}
+
+// 스펀지 중심(월드). home = 처음 놓인 자리(벽에 붙음). 놓을 때는 base 회전 범위 안쪽 자리
+function spongeAt(side, slot, home) {
+  const sx = side === "left" ? -1 : 1, edge = 0.2 + SPONGE.thick / 2 + 0.1;
+  const z = slot === "back" ? FIELD.stopZ + (home ? edge : 2) : FIELD.stopZ - FIELD.boxHalf + (home ? edge : 4);
+  return { x: sx * (FIELD.w / 2 + 0.3 + SPONGE.len / 2), y: 0.4 + SPONGE.h / 2, z };
+}
+// 집는 곳: 경기장 쪽 끝에서 1cm, 위에서 1.5cm
+// out: 실물이 모델보다 덜 뻗을 때 목표를 바깥쪽으로 더 미는 보정(cm)
+function graspPoint(c, side, out = 0) {
+  const sx = side === "left" ? -1 : 1;
+  return { x: c.x - sx * (SPONGE.len / 2 - 1 - out), y: c.y + SPONGE.h / 2 - 1.5, z: c.z };
+}
+// 들고 가는 스펀지가 걸릴 수 있는 것들 (월드 좌표 상자). 0.1cm 이내 접촉은 무시
+function obstacles(sim) {
+  const L = [], e = 0.1;
+  const add = (name, x0, x1, y0, y1, z0, z1) => L.push({ name,
+    x0: Math.min(x0, x1) + e, x1: Math.max(x0, x1) - e, y0: y0 + e, y1: y1 - e, z0: Math.min(z0, z1) + e, z1: Math.max(z0, z1) - e });
+  for (const side of ["left", "right"]) {
+    const sx = side === "left" ? -1 : 1, xi = sx * FIELD.w / 2, xo = xi + sx * FIELD.boxW;
+    const nm = side === "left" ? "왼쪽 상자" : "오른쪽 상자", z0 = FIELD.stopZ - FIELD.boxHalf, z1 = FIELD.stopZ + FIELD.boxHalf;
+    for (const z of [z0, FIELD.stopZ, z1]) add(`${nm} 벽`, xi, xo, 0, BOX_WALL_H, z - 0.2, z + 0.2);
+    add(`${nm} 벽`, xi - 0.2, xi + 0.2, 0, BOX_WALL_H, z0, z1);
+    add(`${nm} 벽`, xo - 0.2, xo + 0.2, 0, BOX_WALL_H, z0, z1);
+    add(`${nm} 바닥`, xi, xo, 0, 0.4, z0, z1);
+  }
+  add("키보드", -16.5, 16.5, 0, 1.2, 0, FIELD.laptopDepth);
+  add("모니터 화면", -17, 17, 0, 22.5, -0.8, 0.3);
+  const cx = sim.x, cz = sim.z;
+  add("차체", cx - CAR.plateW / 2, cx + CAR.plateW / 2, 4.4, 13, cz + 8, cz + CAR.len);
+  add("차체 앞판", cx - CAR.plateW / 2, cx + CAR.plateW / 2, 4.4, 9.8, cz, cz + 8);
+  add("팔 베이스", cx - 3, cx + 3, 9.8, CAR.arm.shoulderY, cz + CAR.arm.pivotZ - 3, cz + CAR.arm.pivotZ + 3);
+  for (const z of [CAR.frontAxle, CAR.frontAxle + CAR.wheelbase]) for (const sx of [-1, 1])
+    add("바퀴", cx + sx * (CAR.width / 2 - CAR.tyreW), cx + sx * CAR.width / 2, 0, 2 * CAR.tyreR, cz + z - CAR.tyreR, cz + z + CAR.tyreR);
+  for (const o of Object.values(sim.objs)) if (!o.held) {
+    const c = Math.abs(Math.cos(o.th)), sn = Math.abs(Math.sin(o.th));
+    const ex = c * SPONGE.len / 2 + sn * SPONGE.thick / 2, ez = sn * SPONGE.len / 2 + c * SPONGE.thick / 2;
+    add(`${o.name} 스펀지`, o.pos.x - ex, o.pos.x + ex, o.pos.y - SPONGE.h / 2, o.pos.y + SPONGE.h / 2, o.pos.z - ez, o.pos.z + ez);
+  }
+  return L;
+}
+// 들고 있는 스펀지: 집은 순간 집게 끝과의 상대 위치·방향을 그대로 유지한 채 세워져 있고,
+// base가 돌면 그만큼 같이 돈다 (가벼운 스펀지를 위에서 약하게 잡은 상태)
+function heldSponge(sim, o) {
+  const tip = armTip(sim.arm, sim.p.armScale), a = o.attach, ph = rad(sim.arm.yaw - a.yaw0);
+  const dx = a.dx * Math.cos(ph) + a.dz * Math.sin(ph), dz = -a.dx * Math.sin(ph) + a.dz * Math.cos(ph);
+  return { c: { x: sim.x + tip.x + dx, y: tip.y + a.dy, z: sim.z + tip.z + dz }, th: a.th0 + ph };
+}
+// th = 스펀지 긴 방향의 회전(rad). 0이면 긴 방향이 경기장 폭(x) 방향
+function spongePoints({ c, th }) {
+  const pts = [], u = { x: Math.cos(th), z: -Math.sin(th) }, w = { x: Math.sin(th), z: Math.cos(th) };
+  for (const a of [-1, -0.5, 0, 0.5, 1]) for (const b of [-1, -0.5, 0, 0.5, 1]) for (const d of [-1, 1]) pts.push({
+    x: c.x + u.x * a * SPONGE.len / 2 + w.x * d * SPONGE.thick / 2,
+    y: c.y + b * SPONGE.h / 2,
+    z: c.z + u.z * a * SPONGE.len / 2 + w.z * d * SPONGE.thick / 2,
+  });
+  return pts;
+}
+const BOX_WALL_H = 5;   // 상자 벽 높이 (사진 추정)
+// 옮기는 높이: 들고 있는 스펀지 바닥이 바닥에서 14cm (상자 벽 5, 서 있는 스펀지 10.4, 차체 13보다 위)
+// p.carryBottom = 들고 가는 스펀지 바닥 높이 → 집게 끝 높이
+const carryTipY = p => p.carryBottom + SPONGE.h - 1.5;
+// 놓을 자리: 칸 안쪽, 벽에서 여유를 두고 base 회전 범위 안
+function placeCenter(side, slot) {
+  const sx = side === "left" ? -1 : 1;
+  return { x: sx * (FIELD.w / 2 + 5.3), y: 0.4 + SPONGE.h / 2, z: slot === "back" ? FIELD.stopZ + 3 : FIELD.stopZ - 5 };
+}
+// 스펀지가 들어 있는 상자와 칸 (상자 밖이면 null)
+function boxOf(pos) {
+  const ax = Math.abs(pos.x);
+  if (ax < FIELD.w / 2 + 0.2 || ax > FIELD.w / 2 + FIELD.boxW - 0.2) return null;
+  return { side: pos.x < 0 ? "left" : "right", slot: pos.z < FIELD.stopZ ? "front" : "back" };
+}
+
+const OBJ_HOME = {
+  red: { side: "left", slot: "back", color: 0xe8552e, name: "빨간" },
+  yellow: { side: "right", slot: "front", color: 0xf2cc3a, name: "노란" },
+};
+
+function judge(z, ref, minZ = z) {
+  const err = z - ref, half = FIELD.red / 2;
+  if (minZ < ref - half - FIELD.yellow) return { text: "정지선 넘음 · 실격", cls: "bad", key: "over" };
+  if (Math.abs(err) <= half) return { text: "빨강 · 만점", cls: "ok", key: "red" };
+  if (Math.abs(err) <= half + FIELD.yellow) return { text: "노랑 · 감점", cls: "warn", key: "yellow" };
+  return err < 0 ? { text: "정지선 넘음 · 실격", cls: "bad", key: "over" } : { text: "정지선 못 미침", cls: "bad", key: "short" };
+}
+
+class Sim {
+  constructor(p, seed, dir) {
+    this.p = { ...p };
+    this.rand = mulberry32(seed);
+    this.dir = dir;
+    this.t = 0; this.z = FIELD.startZ; this.x = 0; this.v = 0; this.cmd = 0; this.odo = 0; this.minZ = this.z;
+    this.locked = false; this.phase = "wait_start_qr"; this.qrAt = 5; this.clock0 = null;
+    this.reading = null; this.queue = []; this.nextSample = 0;
+    this.logs = []; this.trace = []; this.nextTrace = 0;
+    this.done = false; this.finished = false; this.fail = null; this.brakeZ = null; this.sensorJudge = null;
+    this.arm = { yaw: 0, sh: 0, neck: p.neckDeg, grip: 0.3 };
+    this.objs = {};
+    for (const [key, o] of Object.entries(OBJ_HOME)) this.objs[key] = { ...o, homeSide: o.side, held: false, th: 0, attach: null, pos: spongeAt(o.side, o.slot, true) };
+    this.mission = null;
+    this.wake = 0; this.gen = this.program();
+  }
+  gauss() { let u = 0, v = 0; while (!u) u = this.rand(); while (!v) v = this.rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  trueDist() { return this.z / Math.cos(this.p.heading * Math.PI / 180); }
+  sample() {
+    // gpiozero DistanceSensor: 백그라운드 측정값 queue_len(3)개의 중앙값
+    this.queue.push(this.trueDist() + this.p.offset + this.gauss() * this.p.noise);
+    if (this.queue.length > 3) this.queue.shift();
+    const s = [...this.queue].sort((a, b) => a - b);
+    this.reading = s[Math.floor(s.length / 2)];
+  }
+  log(msg) {
+    const tt = this.clock0 === null ? this.t : this.t - this.clock0;
+    this.logs.push(`[${tt.toFixed(2).padStart(6)}s] >>> ${msg}`);
+  }
+  drive(speed) { if (!this.locked) this.cmd = Math.max(-100, Math.min(100, speed)); }
+  stop() { this.cmd = 0; }
+
+  *program() {
+    const p = this.p, frame = 1 / 30;
+    yield 0.2;
+    this.log(`팔 qr_view 자세 (base 90, arm 90, wrist ${p.wristServo})`);
+    this.log(`출발 위치 거리 ${this.reading.toFixed(1)}cm (출발선이면 모니터까지 약 87cm)`);
+    this.log("QR 대기");
+    for (let blank = 0; blank < 5; blank++) yield frame;        // start_qr.blank_frames
+    this.log("화면 비어 있음 확인 → 시작 QR 대기");
+    let count = 0;
+    const view = qrView(p.neckDeg, p.camVfov, this.z, p.armScale);
+    while (count < 2) {                                         // start_qr.confirm_frames
+      yield frame;
+      count = this.t >= this.qrAt + p.qrLatency && view.visible ? count + 1 : 0;
+      if (!view.visible && this.t > this.qrAt + 3) {
+        this.fail = `QR이 웹캠 시야 밖 (중심이 ${Math.abs(view.off).toFixed(0)}° ${view.off < 0 ? "아래" : "위"})`;
+        this.log(`${this.fail} — 실제 drive.py는 출발하지 않고 계속 기다립니다`);
+        this.phase = "error"; return;
+      }
+    }
+    this.clock0 = this.t;
+    this.log(`출발: ${this.dir}`);
+
+    // mission.drive_and_stop()
+    this.phase = "drive";
+    this.log("팔은 drive 자세(qr_view와 같음)로 주행");
+    const target = p.target_cm, brakeAt = target + p.brake_margin_cm, t0 = this.t;
+    let d;
+    while (true) {
+      d = this.reading;
+      if (d <= brakeAt) { this.stop(); break; }
+      this.drive(d > p.slow_down_cm ? p.max_speed : p.slow_speed);
+      if (this.t - t0 > p.max_drive_s) {
+        this.stop(); this.fail = "주행 시간 초과 — 초음파 값 확인 필요";
+        this.log(`RuntimeError: ${this.fail}`); this.phase = "error"; return;
+      }
+      yield 0.01;
+    }
+    this.brakeZ = this.z;
+    this.log(`브레이크 (거리 ${d.toFixed(1)}cm)`);
+
+    this.phase = "fine_adjust";
+    for (let i = 0; i < p.fine_max_tries; i++) {
+      yield p.settle_s;
+      d = this.reading;
+      const err = d - target;
+      if (Math.abs(err) <= p.tolerance_cm) break;
+      this.drive(err > 0 ? p.fine_speed : -p.fine_speed);
+      yield p.fine_pulse_s;
+      this.stop();
+    }
+    this.log(`정지 완료 (거리 ${this.reading.toFixed(1)}cm, 목표 ${target}cm)`);
+    this.locked = true; this.phase = "lock";
+    yield 0.05;
+    this.sensorJudge = judge(this.reading, target);
+    this.log(`예상 판정: ${this.sensorJudge.text.replace(" · ", "(")}) (거리 ${this.reading.toFixed(1)}cm, 목표 ${target}cm)`);
+    yield* this.armMission();
+  }
+
+  // mission.py main()의 1~5단계: 시작 QR 쪽부터 집어 반대쪽 PLACE에 놓고, 반대쪽 물체를 처음 쪽 PLACE에 놓는다
+  *armMission() {
+    const first = this.dir, second = first === "left" ? "right" : "left";
+    const other = slot => (slot === "front" ? "back" : "front");
+    this.phase = "arm";
+    const placeFirst = yield* this.look(first);
+    if (!(yield* this.pick(first, other(placeFirst)))) return;
+    this.log("1번 집기 완료");
+    const placeSecond = yield* this.look(second);
+    if (!(yield* this.place(second, placeSecond))) return;
+    this.log("1번 놓기 완료");
+    if (!(yield* this.pick(second, other(placeSecond)))) return;
+    this.log("2번 집기 완료");
+    if (!(yield* this.place(first, placeFirst))) return;
+    this.log("2번 놓기 완료");
+    if (!(yield* this.moveArm({ yaw: 0, sh: 0, neck: this.p.neckDeg }))) return;
+    const ok = Object.values(this.objs).every(o => {
+      const b = boxOf(o.pos);
+      return !o.held && b && b.side !== o.homeSide && b.slot !== LAYOUT[b.side].pick;
+    });
+    this.mission = ok ? "완료" : "잘못된 상자";
+    if (!ok) this.fail = "물체를 잘못된 상자에 놓음 (실격)";
+    this.log(ok ? "DONE" : this.fail);
+    this.phase = "done";
+  }
+  *look(side) {
+    const slot = LAYOUT[side].pick === "front" ? "back" : "front";
+    if (!this.p.useBoxQr) {   // config look.use_qr = false: 대회 고정 배치를 바로 쓴다
+      this.log(`${side} 상자: PLACE = ${slot} (배치 고정, QR 읽지 않음)`);
+      return slot;
+    }
+    // 실제 코드는 QR(PICK/PLACE) 위치로 판단한다. 시뮬레이터는 인식 성공을 가정
+    if (!(yield* this.moveArm({ yaw: side === "left" ? 70 : -70, sh: 0, neck: -35 }))) return null;
+    yield 0.2;   // look.settle_s
+    this.log(`${side} 상자: PLACE = ${slot} (QR 인식 성공 가정)`);
+    return slot;
+  }
+  // 집기: 위 → (열기) → 직선으로 내려감 → 닫기 → 직선으로 옮기는 높이까지 들어 올림
+  *pick(side, slot) {
+    const o = Object.values(this.objs).find(o => o.side === side && o.slot === slot && !o.held);
+    if (!o) { this.fail = `${side} ${slot} 칸에 물체가 없음`; this.log(this.fail); this.phase = "error"; return false; }
+    const g = graspPoint(o.pos, side, this.p.reachOut);
+    if (!(yield* this.reach({ ...g, y: g.y + 6 }, `${side}_${slot}_above`))) return false;
+    yield* this.gripTo(0);
+    if (!(yield* this.line(g, `${side}_${slot}_down`))) return false;
+    yield* this.gripTo(1);   // 완전히 닫으면 집힌다고 가정 (스펀지는 거의 무게가 없음)
+    const t = this.tipWorld();
+    o.attach = { dx: o.pos.x - t.x, dy: o.pos.y - t.y, dz: o.pos.z - t.z, yaw0: this.arm.yaw, th0: o.th };
+    o.held = true;
+    this.log(`${o.name} 스펀지 집음`);
+    return yield* this.line({ ...g, y: carryTipY(this.p) }, `${side}_${slot}_lift`);
+  }
+  // 놓기: 옮기는 높이 그대로 base만 회전 → 직선으로 칸 위 → 직선으로 내려감 → 열기 → 위로 빠짐
+  *place(side, slot) {
+    const o = Object.values(this.objs).find(o => o.held);
+    const c = placeCenter(side, slot), drop = this.tipFor(c, o, 0.5);
+    const carry = { ...drop, y: carryTipY(this.p) }, swing = this.solve(carry, `${side}_${slot}_carry`);
+    if (!swing) return false;
+    if (!(yield* this.moveArm({ ...this.arm, yaw: swing.yaw }))) return false;
+    if (!(yield* this.line(carry, `${side}_${slot}_carry`))) return false;
+    if (!(yield* this.line(drop, `${side}_${slot}_place`))) return false;
+    const hs = heldSponge(this, o), rest = { c: { ...hs.c, y: 0.4 + SPONGE.h / 2 }, th: hs.th };
+    const obs = obstacles(this), hit = spongePoints(rest).map(q => obs.find(b =>
+      q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1 && q.z > b.z0 && q.z < b.z1)).find(Boolean);
+    yield* this.gripTo(0);
+    Object.assign(o, { held: false, attach: null, pos: rest.c, th: rest.th }, boxOf(rest.c) || { side: null, slot: null });
+    if (hit) { this.fail = `${o.name} 스펀지가 ${hit.name}에 걸쳐 놓임`; this.log(this.fail); this.phase = "error"; return false; }
+    this.log(`${o.name} 스펀지 놓음 → ${o.side} ${o.slot}`);
+    return yield* this.line({ ...drop, y: drop.y + 6 }, `${side}_${slot}_up`);
+  }
+  // 놓았을 때 스펀지 중심이 c에 오게 하는 집게 끝 위치. 스펀지가 base 회전만큼 같이 돌기 때문에 몇 번 반복해 맞춘다
+  tipFor(c, o, lift) {
+    const a = o.attach, yawTo = P => deg(Math.atan2(-(P.x - this.x), -(P.z - this.z - CAR.arm.pivotZ)));
+    let yaw = yawTo(c), T = null;   // base 방향은 집게 끝 위치로만 정해진다
+    for (let i = 0; i < 8; i++) {
+      const ph = rad(yaw - a.yaw0);
+      const dx = a.dx * Math.cos(ph) + a.dz * Math.sin(ph), dz = -a.dx * Math.sin(ph) + a.dz * Math.cos(ph);
+      T = { x: c.x - dx, y: c.y - a.dy + lift, z: c.z - dz };
+      yaw = yawTo(T);
+    }
+    return T;
+  }
+  tipWorld() {
+    const t = armTip(this.arm, this.p.armScale);
+    return { x: t.x + this.x, y: t.y, z: t.z + this.z };
+  }
+  // 집게 끝 T(월드)에 대한 자세. 닿지 않거나 서보 범위 밖이면 실패로 기록하고 null
+  solve(target, name) {
+    const T = { x: target.x - this.x, y: target.y, z: target.z - this.z };
+    const pose = armIK(T, this.p.armScale);
+    if (pose.short !== undefined) {
+      this.fail = pose.short > 0 ? `팔이 닿지 않음: ${name} (약 ${pose.short.toFixed(1)}cm 부족)`
+        : `${name}: 집게 각도 범위 안에서 자세를 찾지 못함 (팔이 거의 닿지 않음)`;
+      this.log(this.fail); this.phase = "error"; return null;
+    }
+    const sv = armServos(pose, this.p.wristSign);
+    const bad = Object.entries(sv).find(([, v]) => v < 0 || v > 180);
+    if (bad) { this.fail = `${name}: ${bad[0]} 서보 범위(0~180) 밖`; this.log(this.fail); this.phase = "error"; return null; }
+    return pose;
+  }
+  logPose(name) {
+    const sv = armServos(this.arm, this.p.wristSign);
+    this.log(`자세 ${name}: base ${sv.base.toFixed(0)} · arm ${sv.arm.toFixed(0)} · wrist ${sv.wrist.toFixed(0)}`);
+  }
+  *reach(target, name) {
+    const pose = this.solve(target, name);
+    if (!pose || !(yield* this.moveArm(pose))) return false;
+    this.logPose(name);
+    return true;
+  }
+  // 집게 끝을 직선으로 움직인다 (0.02초마다 0.3cm, 약 15cm/s). 들고 있는 스펀지가 흔들리지 않게 천천히
+  *line(to, name) {
+    const from = this.tipWorld(), d = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
+    const steps = Math.max(5, Math.ceil(d / 0.3));
+    for (let i = 1; i <= steps; i++) {
+      const f = i / steps, pose = this.solve({
+        x: from.x + (to.x - from.x) * f, y: from.y + (to.y - from.y) * f, z: from.z + (to.z - from.z) * f }, name);
+      if (!pose) return false;
+      Object.assign(this.arm, pose);
+      if (this.heldHit()) return false;
+      yield 0.02;
+    }
+    this.logPose(name);
+    return true;
+  }
+  // hw.move_servos와 같이 모든 관절을 servo_move_time(0.5초) 동안 0.02초 단위로 함께 움직인다
+  *moveArm(target) {
+    const from = { ...this.arm }, steps = 25;
+    for (let i = 1; i <= steps; i++) {
+      for (const k of ["yaw", "sh", "neck"]) this.arm[k] = from[k] + (target[k] - from[k]) * i / steps;
+      const tip = armTip(this.arm, this.p.armScale);
+      if (this.z + tip.z < 0.6) {
+        this.fail = "로봇팔이 모니터에 닿음 (실격)"; this.log(this.fail); this.phase = "error"; return false;
+      }
+      if (this.heldHit()) return false;
+      yield 0.02;
+    }
+    return true;
+  }
+  // 들고 있는 스펀지가 무엇에 걸리면 집게가 놓쳐 떨어진다 (집는 힘이 약함)
+  heldHit() {
+    const o = Object.values(this.objs).find(o => o.held);
+    if (!o) return null;
+    const hs = heldSponge(this, o), obs = obstacles(this);
+    for (const q of spongePoints(hs)) {
+      const hit = obs.find(b => q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1 && q.z > b.z0 && q.z < b.z1);
+      if (!hit) continue;
+      o.held = false;
+      Object.assign(o, { attach: null, pos: { x: hs.c.x, y: 0.4 + SPONGE.h / 2, z: hs.c.z }, th: hs.th });
+      this.fail = `${o.name} 스펀지가 ${hit.name}에 걸려 떨어짐`;
+      this.log(this.fail); this.phase = "error";
+      return hit.name;
+    }
+    return null;
+  }
+  *gripTo(v) {
+    const from = this.arm.grip;
+    // hw.grip: grip_move_s 동안 servo_step_s(0.02초) 단위로 천천히 움직인 뒤 grip_wait_s 대기
+    const steps = Math.max(1, Math.round(this.p.grip_move_s / 0.02));
+    for (let i = 1; i <= steps; i++) { this.arm.grip = from + (v - from) * i / steps; yield 0.02; }
+    if (this.p.grip_wait_s > 0) yield this.p.grip_wait_s;
+  }
+
+  step(dt) {
+    const p = this.p;
+    if (this.t >= this.nextSample) { this.sample(); this.nextSample += p.sonarInterval; }
+    while (!this.done && this.t >= this.wake) {
+      const r = this.gen.next();
+      if (r.done) { this.done = true; break; }
+      this.wake = this.t + r.value;
+    }
+    if (this.cmd === 0) {   // throttle 0 = 브레이크
+      const dv = p.brake * dt;
+      this.v = Math.abs(this.v) <= dv ? 0 : this.v - Math.sign(this.v) * dv;
+    } else {
+      this.v += (this.cmd / 100 * p.vmax - this.v) * Math.min(1, dt / p.tau);
+    }
+    const h = p.heading * Math.PI / 180, ds = this.v * dt;
+    this.z -= ds * Math.cos(h); this.x += ds * Math.sin(h); this.odo += ds; this.minZ = Math.min(this.minZ, this.z);
+    const bump = FIELD.laptopDepth - CAR.wheelFront;   // 앞바퀴가 키보드 모서리에 닿는 센서 위치
+    if (this.z < bump) { this.z = bump; this.v = 0; if (!this.fail) { this.fail = "노트북에 충돌"; this.log(this.fail); } }
+    this.t += dt;
+    if (this.t >= this.nextTrace) { this.trace.push([this.t, this.z, this.reading]); this.nextTrace += 0.05; }
+    if (this.done && this.v === 0 && !this.finished) this.finished = true;
+  }
+}
+const DT = 0.002;
+function runHeadless(seed, dir) {
+  const s = new Sim(P, seed, dir);
+  while (!s.finished && s.t < 40) s.step(DT);
+  return s;
+}
+
+// ---------------- 3D 장면 ----------------
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.5, 2000);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.maxPolarAngle = Math.PI * 0.98;
+controls.minDistance = 20; controls.maxDistance = 600;
+
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function applyTheme() { scene.background = new THREE.Color(cssVar("--stage")); scene.fog = new THREE.Fog(scene.background, 350, 900); }
+applyTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f94, 0.75));
+const sun = new THREE.DirectionalLight(0xffffff, 0.75);
+sun.position.set(-60, 140, 80); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -120, right: 120, top: 120, bottom: -120, near: 10, far: 400 });
+scene.add(sun);
+
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...extra });
+function box(w, h, d, material, x, y, z, parent = scene) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m;
+}
+function canvasTexture(w, h, draw) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+}
+
+// 바닥 (60cm 타일)
+const floorTex = canvasTexture(256, 256, (g, w, h) => {
+  g.fillStyle = "#b9bdbf"; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * 0.05})`; g.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+  g.strokeStyle = "#a3a8ab"; g.lineWidth = 3; g.strokeRect(0, 0, w, h);
+});
+floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping; floorTex.repeat.set(10, 10);
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), mat(0xffffff, { map: floorTex }));
+floor.rotation.x = -Math.PI / 2; floor.position.set(0, -0.05, 50); floor.receiveShadow = true; scene.add(floor);
+
+// 경기장 종이: 4절지(39.4 × 54.5cm) 두 장을 길이 방향으로 이어 붙임. 이음선 z = 54.5
+for (const [z0, shade] of [[0, 0xf7f7f4], [FIELD.sheet, 0xf4f4f0]]) {
+  const sheet = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.w, FIELD.sheet), mat(shade, { roughness: 0.95 }));
+  sheet.rotation.x = -Math.PI / 2; sheet.position.set(0, 0.02, z0 + FIELD.sheet / 2); sheet.receiveShadow = true; scene.add(sheet);
+}
+// 뒤쪽 끝 고정 구멍
+for (const x of [-FIELD.w / 2 + 1.5, -FIELD.w / 2 + 3, FIELD.w / 2 - 3, FIELD.w / 2 - 1.5]) {
+  const hole = new THREE.Mesh(new THREE.CircleGeometry(0.35, 12), mat(0x3a3d40));
+  hole.rotation.x = -Math.PI / 2; hole.position.set(x, 0.04, FIELD.len - 1.5); scene.add(hole);
+}
+function tape(color, w, z0, z1, x0 = -FIELD.w / 2, x1 = FIELD.w / 2) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), mat(color, { roughness: 0.6 }));
+  m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.05, (z0 + z1) / 2); m.receiveShadow = true; scene.add(m);
+}
+const RED = 0xc8322a, YEL = 0xe9b31c;
+tape(YEL, 0, FIELD.stopZ - 3, FIELD.stopZ - 1);
+tape(RED, 0, FIELD.stopZ - 1, FIELD.stopZ + 1);
+tape(YEL, 0, FIELD.stopZ + 1, FIELD.stopZ + 3);
+tape(RED, 0, FIELD.startZ - 1, FIELD.startZ + 1);
+tape(0x1d1d1d, 0, FIELD.startZ + 1, FIELD.len, -0.75, 0.75);   // 검은 가이드라인
+tape(0xd6d4cd, 0, FIELD.sheet - 0.08, FIELD.sheet + 0.08);   // 두 장 이음선
+
+// 상자 (정지선 기준 앞뒤 10cm, 좌우 15cm) + PICK/PLACE 판 + 물체
+const cardboard = mat(0xb48a5a), cardboardDark = mat(0x9c7548);
+function labelTexture(text) {
+  return canvasTexture(128, 160, (g, w, h) => {
+    g.fillStyle = "#fbfbf8"; g.fillRect(0, 0, w, h);
+    g.fillStyle = "#222"; g.fillRect(14, 14, 100, 100); g.fillStyle = "#fbfbf8"; g.fillRect(26, 26, 76, 76);
+    g.fillStyle = "#222"; g.fillRect(40, 40, 48, 48);
+    g.font = "600 22px sans-serif"; g.textAlign = "center"; g.fillText(text, w / 2, 145);
+  });
+}
+const pickTex = labelTexture("PICK"), placeTex = labelTexture("PLACE");
+const sideState = {};
+function buildBox(side) {
+  const s = side === "left" ? -1 : 1, x0 = s * FIELD.w / 2, xc = x0 + s * FIELD.boxW / 2, H = 5, T = 0.4;
+  const zc = FIELD.stopZ, L = FIELD.boxHalf * 2;
+  box(FIELD.boxW, 0.4, L, cardboardDark, xc, 0.2, zc);
+  box(FIELD.boxW, H, T, cardboard, xc, H / 2, zc - L / 2);
+  box(FIELD.boxW, H, T, cardboard, xc, H / 2, zc + L / 2);
+  box(FIELD.boxW, H, T, cardboard, xc, H / 2, zc);
+  box(T, H, L, cardboard, x0, H / 2, zc);
+  box(T, H, L, cardboard, x0 + s * FIELD.boxW, H / 2, zc);
+  const group = new THREE.Group(); scene.add(group); sideState[side] = { group, xc, s };
+}
+// 경기장 사진 기준 배치 (로봇 진행 방향 기준 좌우, front = 모니터 쪽 칸)
+// 왼쪽: 주황 스펀지가 뒤 칸, 경기장 쪽 벽과 칸막이에 붙어 있음
+// 오른쪽: 노란 스펀지가 앞 칸, 경기장 쪽 벽과 모니터 쪽 벽에 붙어 있음
+const LAYOUT = {
+  left: { pick: "back", color: 0xe8552e, wallZ: FIELD.stopZ, toward: 1 },
+  right: { pick: "front", color: 0xf2cc3a, wallZ: FIELD.stopZ - FIELD.boxHalf, toward: 1 },
+};
+function placeObjects() {
+  for (const side of ["left", "right"]) {
+    const st = sideState[side], lay = LAYOUT[side];
+    st.group.clear();
+    for (const slot of ["front", "back"]) {
+      const zc = slot === "front" ? FIELD.stopZ - 5 : FIELD.stopZ + 5;
+      const isPick = slot === lay.pick;
+      // QR 판: 상자 바깥쪽 벽 위에 세움 (7×7cm)
+      const board = new THREE.Mesh(new THREE.PlaneGeometry(7, 8.75), new THREE.MeshStandardMaterial({ map: isPick ? pickTex : placeTex, roughness: 0.9, side: THREE.DoubleSide }));
+      board.position.set(st.xc + st.s * (FIELD.boxW / 2 - 0.4), 9.5, zc);
+      board.rotation.y = -st.s * Math.PI / 2;
+      st.group.add(board);
+    }
+  }
+}
+buildBox("left"); buildBox("right"); placeObjects();
+// 스펀지: 상자 위치는 시뮬레이션 상태를 따른다
+const spongeMesh = {};
+for (const [key, o] of Object.entries(OBJ_HOME)) spongeMesh[key] = box(SPONGE.len, SPONGE.h, SPONGE.thick, mat(o.color, { roughness: 1 }), 0, 0, 0);
+
+// 노트북: 키보드는 경기장 위 z 0~22, 화면은 경기장 끝(z 0)에 세워 주황 클램프로 고정
+const laptop = new THREE.Group(); scene.add(laptop);
+const laptopBody = mat(0x2a2d31, { roughness: 0.5, metalness: 0.2 });
+box(33, 1.2, FIELD.laptopDepth, laptopBody, 0, 0.6, FIELD.laptopDepth / 2, laptop);
+box(29, 0.15, 11, mat(0x15171a), 0, 1.25, 7.5, laptop);           // 자판
+box(10, 0.1, 6, mat(0x3a3e43), 0, 1.25, 17, laptop);              // 터치패드
+const clampMat = mat(0xf08a24, { roughness: 0.6 });
+for (const x of [-17.5, 17.5]) {
+  box(3, 2.5, 4, clampMat, x, 1.25, 0.5, laptop);
+  box(3, 2.5, 4, clampMat, x, 1.25, FIELD.laptopDepth - 1, laptop);
+}
+const screenCanvas = document.createElement("canvas"); screenCanvas.width = 512; screenCanvas.height = 320;
+const screenTex = new THREE.CanvasTexture(screenCanvas);
+const qrImgs = {};
+for (const k of ["left", "right"]) { const im = new Image(); im.src = QR_IMG[k]; im.onload = () => { screenState = ""; }; qrImgs[k] = im; }
+let screenState = "";
+function drawScreen(sim) {
+  let state = "idle", label = "";
+  if (sim && sim.t >= sim.qrAt) { state = "qr-" + sim.dir; }
+  else if (sim) { state = "count-" + Math.ceil(sim.qrAt - sim.t); label = String(Math.ceil(sim.qrAt - sim.t)); }
+  if (state === screenState) return;
+  screenState = state;
+  const g = screenCanvas.getContext("2d"), w = 512, h = 320;
+  g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
+  g.imageSmoothingEnabled = false;
+  if (state.startsWith("qr-")) {
+    const size = 15 / 20 * h;   // 15cm QR / 20cm 화면 높이
+    const im = qrImgs[sim.dir];
+    if (im.complete) g.drawImage(im, (w - size) / 2, (h - size) / 2, size, size);
+  } else if (label) {
+    g.fillStyle = "#9aa1a6"; g.font = "600 40px sans-serif"; g.textAlign = "right"; g.fillText(label, w - 24, 56);
+  }
+  screenTex.needsUpdate = true;
+}
+const screenGroup = new THREE.Group();
+screenGroup.position.set(0, 0, 0); laptop.add(screenGroup);   // 화면 앞면 = z 0 = 모니터 전면
+box(34, 22, 0.8, laptopBody, 0, 11, -0.4, screenGroup);
+const screenMesh = new THREE.Mesh(new THREE.PlaneGeometry(30, 19), new THREE.MeshBasicMaterial({ map: screenTex }));
+screenMesh.position.set(0, 11.5, 0.02); screenGroup.add(screenMesh);
+screenTex.magFilter = THREE.NearestFilter;
+
+// 로봇: 원점 = 초음파 센서 위치(판정 기준), 차체는 +z(뒤)로 뻗음
+const car = new THREE.Group(); scene.add(car);
+const acrylic = mat(0x1f2328, { roughness: 0.4 }), blue = mat(0x2b5fb3, { roughness: 0.5 }), silver = mat(0xc8ccd0, { metalness: 0.6, roughness: 0.3 });
+const tyreMat = mat(0x161616, { roughness: 1 }), alloy = mat(0x24272b, { roughness: 0.45, metalness: 0.4 });
+box(CAR.plateW, 0.3, CAR.len - 1, alloy, 0, 4.6, (CAR.len - 1) / 2 + 0.5, car);          // 알루미늄 차체 판
+box(CAR.plateW, 8, CAR.len - 8, alloy, 0, 9, 8 + (CAR.len - 8) / 2, car);                 // 배터리·라즈베리파이 상자
+box(CAR.plateW, 0.4, 8, alloy, 0, 9.6, 4, car);                                        // 팔 베이스가 놓이는 앞쪽 판
+// 앞쪽 아래 은색 원통 두 개(사진). 초음파 센서는 팔 베이스 앞의 위쪽 한 쌍으로 본다 (hw.py: 베이스와 같이 돈다)
+for (const y of [8.1, 10.2]) {
+  const c = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1.2, 16), silver);
+  c.rotation.x = Math.PI / 2; c.position.set(0, y, 0.2); car.add(c);
+}
+const wheels = [];
+const wheelX = CAR.width / 2 - CAR.tyreW / 2;
+for (const z of [CAR.frontAxle, CAR.frontAxle + CAR.wheelbase]) for (const x of [-wheelX, wheelX]) {
+  const wg = new THREE.Group(); wg.position.set(x, CAR.tyreR, z); car.add(wg);
+  const tyre = new THREE.Mesh(new THREE.CylinderGeometry(CAR.tyreR, CAR.tyreR, CAR.tyreW, 28), tyreMat);
+  tyre.rotation.z = Math.PI / 2; tyre.castShadow = true; wg.add(tyre);
+  const hub = new THREE.Mesh(new THREE.BoxGeometry(CAR.tyreW + 0.1, 3.6, 0.8), mat(0x8d9297, { metalness: 0.5 }));
+  wg.add(hub); wheels.push(wg);
+}
+// 팔: base 회전(초음파가 같이 돈다) → arm 어깨 → wrist 목 → 집게. 센서 앞면 = 차량 원점(z 0)
+function link(a, b, t, material, parent) {
+  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), len = A.distanceTo(B);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(t, len, t), material);
+  m.position.copy(A).add(B).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+  m.castShadow = true; parent.add(m); return m;
+}
+const armMat = mat(0x18191b, { roughness: 0.5 }), AR = CAR.arm;
+const yawG = new THREE.Group(); yawG.position.set(0, 0, AR.pivotZ); car.add(yawG);
+const turntable = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 1.4, 24), blue);
+turntable.position.y = 10.5; turntable.castShadow = true; yawG.add(turntable);
+box(4.5, 4, 0.5, blue, 0, CAR.sensorY, -AR.pivotZ + 0.9, yawG);
+for (const x of [-1.3, 1.3]) {
+  const eye = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 1.2, 16), silver);
+  eye.rotation.x = Math.PI / 2; eye.position.set(x, CAR.sensorY, -AR.pivotZ + 0.6); yawG.add(eye);
+}
+link([0, 11, 0], [0, AR.shoulderY, 0], 2.4, armMat, yawG);
+const shoulderG = new THREE.Group(); shoulderG.position.set(0, AR.shoulderY, 0); yawG.add(shoulderG);
+link([0, 0, 0], [0, 8.5, 0], 2.2, armMat, shoulderG);
+link([0, 8.5, 0], [0, AR.up, -AR.fwd], 2, armMat, shoulderG);
+const neck = new THREE.Group(); neck.position.set(0, AR.up, -AR.fwd); shoulderG.add(neck);
+box(2.4, 2.4, 3, armMat, 0, 0, -1, neck);                                             // 목 서보
+box(2, 3.6, 2, armMat, 0, -2.6, -5, neck);                                            // 집게 서보
+const fingers = [-1, 1].map(sx => {
+  const g = new THREE.Group(); g.userData.sx = sx; neck.add(g);
+  link([0, 0, -2], [0, 0, -AR.grip], 0.5, silver, g); return g;
+});
+box(4.6, 3, 3, mat(0x111111, { roughness: 0.4 }), 0, AR.cam[0], AR.cam[1], neck);         // 웹캠
+const lens = new THREE.Mesh(new THREE.CircleGeometry(0.9, 20), mat(0x2d4f7a, { metalness: 0.5, roughness: 0.2 }));
+lens.position.set(0, AR.cam[0], AR.cam[1] - 1.52); lens.rotation.y = Math.PI; neck.add(lens);
+function poseArm(arm, k) {
+  yawG.rotation.y = rad(arm.yaw);
+  shoulderG.rotation.x = -rad(arm.sh); shoulderG.scale.setScalar(k);
+  neck.rotation.x = rad(arm.neck);
+  const half = (SPONGE.thick / 2 + 0.25) / k + 1.6 * (1 - arm.grip);   // 완전히 닫으면 스펀지 두께에 닿음
+  for (const g of fingers) g.position.x = g.userData.sx * half;
+}
+// wrist 서보 값 → 목 각도. 방향은 조립에 따라 다르므로 선택값을 따른다
+function updateNeck() {
+  P.wristSign = document.getElementById("sel-wristdir").value === "dec-down" ? 1 : -1;
+  P.neckDeg = NECK_AT_90 + P.wristSign * (P.wristServo - 90);
+  writeConfig();
+}
+
+// 웹캠 시야: 위·아래 경계와 가운데 방향. 출발 QR이 시야 안이면 초록, 밖이면 빨강
+const fovGeo = new THREE.BufferGeometry().setFromPoints(Array(6).fill(0).map(() => new THREE.Vector3()));
+const fovMat = new THREE.LineBasicMaterial({ color: 0x23845a });
+const fovLines = new THREE.LineSegments(fovGeo, fovMat); scene.add(fovLines);
+
+// 초음파 빔, 브레이크 위치 표시
+const beamGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const beam = new THREE.Line(beamGeo, new THREE.LineDashedMaterial({ color: 0xc8322a, dashSize: 1.5, gapSize: 1 }));
+scene.add(beam);
+const brakeFlag = new THREE.Group(); brakeFlag.visible = false; scene.add(brakeFlag);
+box(0.3, 14, 0.3, mat(0x555a5f), 0, 7, 0, brakeFlag);
+box(4, 2.4, 0.15, mat(0x2b5fb3), 2, 12.6, 0, brakeFlag);
+
+// ---------------- 시점 ----------------
+const VIEWS = {
+  orbit: { pos: [95, 80, 150], target: [0, 0, 45] },
+  top: { pos: [0.01, 190, 50], target: [0, 0, 50] },
+  side: { pos: [140, 22, 45], target: [0, 4, 45] },
+};
+let viewMode = "orbit", tween = null;
+function setView(mode) {
+  viewMode = mode;
+  for (const k of ["orbit", "top", "side", "chase"]) document.getElementById("view-" + k).setAttribute("aria-pressed", String(k === mode));
+  if (mode === "chase") return;
+  const v = VIEWS[mode];
+  tween = { pos: new THREE.Vector3(...v.pos), target: new THREE.Vector3(...v.target) };
+}
+camera.position.set(...VIEWS.orbit.pos); controls.target.set(...VIEWS.orbit.target);
+for (const k of ["orbit", "top", "side", "chase"]) document.getElementById("view-" + k).addEventListener("click", () => setView(k));
+controls.addEventListener("start", () => { tween = null; });
+
+// ---------------- UI ----------------
+const $ = id => document.getElementById(id);
+buildParams(CFG, $("params-cfg"));
+buildParams(PHYS, $("params-phys"));
+buildParams(POSE, $("params-pose"));
+$("sel-wristdir").addEventListener("change", updateNeck);
+P.useBoxQr = false;
+$("sel-boxqr").addEventListener("change", () => { P.useBoxQr = $("sel-boxqr").value === "read"; writeConfig(); });
+updateNeck();
+function writeConfig() {
+  const r = (v, n = 2) => +(+v).toFixed(n);
+  const out = {
+    motor: { max_speed: P.max_speed, slow_speed: P.slow_speed, fine_speed: P.fine_speed, fine_pulse_s: r(P.fine_pulse_s), max_drive_s: P.max_drive_s },
+    grip_move_s: r(P.grip_move_s), grip_wait_s: r(P.grip_wait_s),
+    stop: { target_cm: r(P.target_cm, 1), slow_down_cm: P.slow_down_cm, brake_margin_cm: r(P.brake_margin_cm, 1),
+      tolerance_cm: r(P.tolerance_cm, 1), settle_s: r(P.settle_s), fine_max_tries: P.fine_max_tries },
+    poses: {
+      qr_view: { base: 90, arm: 90, wrist: P.wristServo },
+      drive: { base: 90, arm: 90, wrist: P.wristServo },
+    },
+    look: { use_qr: !!P.useBoxQr, default_place: { left: "front", right: "back" } },
+  };
+  $("cfg-out").value = JSON.stringify(out, null, 2)
+    .replace(/\{\n\s+"([^{}]+)\n\s+\}/g, (m) => m.replace(/\n\s+/g, " ").replace("{ ", "{ ").replace(/ \}$/, " }"));
+}
+writeConfig();
+$("btn-copy").addEventListener("click", () => {
+  const ta = $("cfg-out");
+  navigator.clipboard.writeText(ta.value).then(() => { $("copy-msg").textContent = "복사했습니다. motor·stop 항목과 poses의 qr_view·drive에 덮어쓰세요."; })
+    .catch(() => { ta.focus(); ta.select(); $("copy-msg").textContent = "선택했습니다. Ctrl+C로 복사하세요."; });
+});
+
+let sim = null, running = false, seed = 1, lastLogLen = -1;
+function pickDir() { const v = $("sel-dir").value; return v === "random" ? (Math.random() < 0.5 ? "left" : "right") : v; }
+function reset() {
+  sim = null; running = false; lastLogLen = -1; screenState = "";
+  placeObjects();
+  $("btn-start").textContent = "시작 버튼";
+  $("v-main").textContent = "아직 주행 전"; $("v-main").className = "big";
+  $("v-detail").textContent = "정지 후 센서 위치로 판정합니다 (빨강 29~31cm, 노랑 27~33cm)";
+  $("log").textContent = ""; brakeFlag.visible = false;
+}
+$("btn-reset").addEventListener("click", reset);
+$("btn-start").addEventListener("click", () => {
+  if (running) { running = false; $("btn-start").textContent = "계속"; return; }
+  if (!sim || sim.finished) { reset(); sim = new Sim(P, seed++, pickDir()); }
+  running = true; $("btn-start").textContent = "일시정지";
+});
+
+const PHASES = { wait_start_qr: "QR 대기", drive: "주행", fine_adjust: "미세 보정", lock: "바퀴 잠금", done: "완료", error: "오류" };
+function updateHud() {
+  const s = sim;
+  const z = s ? s.z : FIELD.startZ;
+  $("h-time").textContent = (s ? s.t : 0).toFixed(2) + "s";
+  $("h-true").textContent = z.toFixed(1) + "cm";
+  $("h-sonar").textContent = s && s.reading != null ? s.reading.toFixed(1) + "cm" : "-";
+  $("h-cmd").textContent = (s && s.cmd >= 0 ? "+" : "") + (s ? s.cmd : 0).toFixed(0);
+  const qv = qrView(P.neckDeg, P.camVfov, FIELD.startZ, P.armScale);   // 출발선에서 본 QR
+  $("h-qr").textContent = (qv.visible ? "보임 " : "벗어남 ") + (qv.off >= 0 ? "+" : "") + qv.off.toFixed(0) + "°";
+  $("h-qr").style.color = qv.visible ? "var(--ok)" : "var(--bad)";
+  const ph = $("phase");
+  ph.textContent = s ? (s.finished ? (s.fail ? "실패" : "완료") : PHASES[s.phase] || s.phase) : "대기";
+  ph.className = "pill" + (s && !s.finished ? " run" : s && s.finished && !s.fail ? " ok" : "");
+  if (s && s.logs.length !== lastLogLen) {
+    lastLogLen = s.logs.length; $("log").textContent = s.logs.join("\n"); $("log").scrollTop = 1e6;
+  }
+  if (s && s.finished && running) {
+    running = false; $("btn-start").textContent = "다시 시작";
+    const j = judge(s.z, FIELD.stopZ, s.minZ);
+    $("v-main").textContent = s.fail ? s.fail : j.text;
+    $("v-main").className = "big " + (s.fail ? "bad" : j.cls);
+    $("v-detail").textContent = `실제 센서 위치 ${s.z.toFixed(2)}cm · 초음파 ${s.reading.toFixed(2)}cm · 브레이크 위치 ${s.brakeZ ? s.brakeZ.toFixed(1) : "-"}cm · 가장 깊이 ${s.minZ.toFixed(2)}cm · QR 후 ${(s.t - (s.clock0 || 0)).toFixed(2)}s · 물체 이동 ${s.mission || "실패"}`;
+  }
+}
+
+function sizeCanvas(c) {
+  const r = c.getBoundingClientRect(), dpr = Math.min(devicePixelRatio, 2);
+  if (c.width !== Math.round(r.width * dpr)) { c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr); }
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); return [g, r.width, r.height];
+}
+function drawChart() {
+  const [g, w, h] = sizeCanvas($("chart"));
+  g.clearRect(0, 0, w, h);
+  const pad = { l: 34, r: 8, t: 8, b: 20 }, T = Math.max(8, sim ? sim.t : 8);
+  const X = t => pad.l + t / T * (w - pad.l - pad.r), Y = d => pad.t + (92 - d) / (92 - 20) * (h - pad.t - pad.b);
+  const tgt = FIELD.stopZ;
+  g.fillStyle = cssVar("--tape-yellow"); g.globalAlpha = 0.25; g.fillRect(pad.l, Y(tgt + 3), w - pad.l - pad.r, Y(tgt - 3) - Y(tgt + 3));
+  g.fillStyle = cssVar("--accent"); g.globalAlpha = 0.25; g.fillRect(pad.l, Y(tgt + 1), w - pad.l - pad.r, Y(tgt - 1) - Y(tgt + 1));
+  g.globalAlpha = 1;
+  g.font = "10px " + cssVar("--font-data"); g.fillStyle = cssVar("--muted"); g.strokeStyle = cssVar("--line"); g.lineWidth = 1;
+  for (const d of [30, 45, 60, 75, 90]) { g.beginPath(); g.moveTo(pad.l, Y(d)); g.lineTo(w - pad.r, Y(d)); g.stroke(); g.textAlign = "right"; g.fillText(d, pad.l - 4, Y(d) + 3); }
+  g.textAlign = "center";
+  const stepT = T > 16 ? 4 : 2;
+  for (let t = 0; t <= T; t += stepT) g.fillText(t + "s", X(t), h - 6);
+  if (!sim) return;
+  g.strokeStyle = cssVar("--fg"); g.lineWidth = 1.6; g.beginPath();
+  sim.trace.forEach(([t, z], i) => i ? g.lineTo(X(t), Y(z)) : g.moveTo(X(t), Y(z))); g.stroke();
+  g.strokeStyle = cssVar("--accent"); g.setLineDash([4, 3]); g.lineWidth = 1.2; g.beginPath();
+  sim.trace.forEach(([t, , d], i) => { if (d == null) return; i ? g.lineTo(X(t), Y(d)) : g.moveTo(X(t), Y(d)); }); g.stroke(); g.setLineDash([]);
+  const last = sim.trace[sim.trace.length - 1];
+  if (last) { g.fillStyle = cssVar("--fg"); g.beginPath(); g.arc(X(last[0]), Y(last[1]), 3, 0, 7); g.fill(); }
+}
+
+let batch = null;
+function drawStrip() {
+  const [g, w, h] = sizeCanvas($("strip"));
+  g.clearRect(0, 0, w, h);
+  const lo = 22, hi = 38, tgt = FIELD.stopZ, X = z => 10 + (z - lo) / (hi - lo) * (w - 20);
+  g.fillStyle = cssVar("--tape-yellow"); g.globalAlpha = 0.35; g.fillRect(X(tgt - 3), 6, X(tgt + 3) - X(tgt - 3), h - 30);
+  g.fillStyle = cssVar("--accent"); g.globalAlpha = 0.35; g.fillRect(X(tgt - 1), 6, X(tgt + 1) - X(tgt - 1), h - 30);
+  g.globalAlpha = 1; g.fillStyle = cssVar("--muted"); g.font = "10px " + cssVar("--font-data"); g.textAlign = "center";
+  for (let z = 24; z <= 36; z += 2) g.fillText(z + "cm", X(z), h - 8);
+  if (!batch) { g.fillText("버튼을 누르면 30회 주행의 정지 위치가 찍힙니다", w / 2, (h - 24) / 2 + 6); return; }
+  const bins = {};
+  for (const r of batch) {
+    const z = Math.max(lo, Math.min(hi, r.z)), k = Math.round(z * 4);
+    bins[k] = (bins[k] || 0) + 1;
+    g.fillStyle = r.fail ? cssVar("--bad") : cssVar("--fg");
+    g.beginPath(); g.arc(X(z), h - 30 - bins[k] * 6, 2.6, 0, 7); g.fill();
+  }
+}
+$("btn-batch").addEventListener("click", () => {
+  batch = [];
+  for (let i = 0; i < 30; i++) { const s = runHeadless(1000 + i, i % 2 ? "left" : "right"); batch.push({ z: s.z, minZ: s.minZ, fail: s.fail, time: s.t - s.clock0 }); }
+  const c = { red: 0, yellow: 0, over: 0, short: 0 }, fails = batch.filter(r => r.fail).length;
+  for (const r of batch) if (!r.fail) c[judge(r.z, FIELD.stopZ, r.minZ).key]++;
+  const mean = batch.reduce((a, r) => a + r.z, 0) / batch.length;
+  $("counts").innerHTML = `<span style="color:var(--ok)">빨강 ${c.red}</span><span style="color:var(--warn)">노랑 ${c.yellow}</span>` +
+    `<span style="color:var(--bad)">넘음 ${c.over}</span><span>못 미침 ${c.short}</span>${fails ? `<span style="color:var(--bad)">실패 ${fails}</span>` : ""}<span>평균 ${mean.toFixed(2)}cm</span><span>평균 시간 ${(batch.reduce((t, r) => t + r.time, 0) / batch.length).toFixed(2)}s</span>`;
+  drawStrip();
+});
+
+function drawSponges() {
+  for (const [key, home] of Object.entries(OBJ_HOME)) {
+    const m = spongeMesh[key], o = sim ? sim.objs[key] : null;
+    if (o && o.held) {
+      const hs = heldSponge(sim, o);
+      m.position.set(hs.c.x, hs.c.y, hs.c.z); m.rotation.y = hs.th;
+    } else {
+      const c = o ? o.pos : spongeAt(home.side, home.slot, true);
+      m.position.set(c.x, c.y, c.z); m.rotation.y = o ? o.th : 0;
+    }
+  }
+}
+
+// ---------------- 루프 ----------------
+function resize() {
+  const r = stage.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / Math.max(1, r.height); camera.updateProjectionMatrix();
+}
+new ResizeObserver(() => { resize(); drawChart(); drawStrip(); }).observe(stage);
+resize();
+
+let prev = performance.now(), chartTick = 0;
+function frame(now) {
+  const real = Math.min(0.05, (now - prev) / 1000); prev = now;
+  if (sim && running) {
+    const n = Math.round(real * +$("sel-rate").value / DT);
+    for (let i = 0; i < n && !sim.finished; i++) sim.step(DT);
+  }
+  const z = sim ? sim.z : FIELD.startZ, x = sim ? sim.x : 0, h = sim ? sim.p.heading * Math.PI / 180 : 0;
+  car.position.set(x, 0, z); car.rotation.y = -h;
+  const spin = (sim ? sim.odo : 0) / CAR.tyreR;
+  for (const wg of wheels) wg.rotation.x = -spin;
+  const sp = new THREE.Vector3(0, CAR.sensorY, 0).applyMatrix4(car.matrixWorld);
+  beamGeo.setFromPoints([sp, new THREE.Vector3(x - Math.tan(h) * z, CAR.sensorY, 0)]); beam.computeLineDistances();
+  beam.visible = !!sim && !sim.locked;
+  if (sim && sim.brakeZ != null) { brakeFlag.visible = true; brakeFlag.position.set(-FIELD.w / 2 - 1, 0, sim.brakeZ); }
+  drawScreen(sim);
+  poseArm(sim ? sim.arm : { yaw: 0, sh: 0, neck: P.neckDeg, grip: 0.3 }, sim ? sim.p.armScale : P.armScale);
+  car.updateMatrixWorld(true);
+  const camW = neck.localToWorld(new THREE.Vector3(0, AR.cam[0], AR.cam[1] - 1.5));
+  const nq = neck.getWorldQuaternion(new THREE.Quaternion()), half = P.camVfov / 2 * Math.PI / 180;
+  const pts = [];
+  for (const a of [half, 0, -half]) {
+    const dir = new THREE.Vector3(0, Math.sin(a), -Math.cos(a)).applyQuaternion(nq);
+    const len = dir.z < -0.05 ? Math.min(160, camW.z / -dir.z) : 40;
+    pts.push(camW, camW.clone().addScaledVector(dir, len));
+  }
+  fovGeo.setFromPoints(pts);
+  fovMat.color.set(qrView(P.neckDeg, P.camVfov, z, P.armScale).visible ? 0x23845a : 0xc8322a);
+  drawSponges();
+  if (viewMode === "chase") {
+    const want = new THREE.Vector3(x + 26, 34, z + 52), tgt = new THREE.Vector3(x, 4, z - 18);
+    camera.position.lerp(want, 0.08); controls.target.lerp(tgt, 0.12);
+  } else if (tween) {
+    camera.position.lerp(tween.pos, 0.09); controls.target.lerp(tween.target, 0.09);
+    if (camera.position.distanceTo(tween.pos) < 0.5) tween = null;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  updateHud();
+  if (++chartTick % 3 === 0) drawChart();
+  requestAnimationFrame(frame);
+}
+drawStrip();
+requestAnimationFrame(frame);
+</script>

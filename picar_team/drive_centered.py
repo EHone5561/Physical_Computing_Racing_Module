@@ -140,7 +140,7 @@ def drive_and_stop_centered(gyro, lines):
     t_start = last_print = time.time()
     while True:
         d = filt.update(hw.get_distance())
-        if d <= brake_at:
+        if d <= brake_at + boost.brake_lead():
             hw.stop()
             break
         heading = gyro.read()

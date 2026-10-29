@@ -166,12 +166,29 @@ def start_gyro():
 
 
 def drive_to_line(gyro, lines):
+    """정지선까지 간다. 돌려주는 값: 정지 후 차의 방향(°, 왼쪽 +). 자이로가 없으면 0"""
     if gyro is None:
         mission.drive_and_stop()
-        return
+        return 0.0
     import drive_centered
     heading, lateral = drive_centered.drive_and_stop_centered(gyro, lines)
     mission.log(f"정지 후 방향 {heading:+.1f}° · 좌우 {lateral:+.1f}cm (추정, 왼쪽 +)")
+    return heading
+
+
+def apply_heading(cfg, heading):
+    """차가 틀어진 만큼 집기·놓기 자세의 base를 반대로 돌린다 (상자는 경기장에 고정돼 있으므로).
+    왼쪽(+)으로 틀어졌으면 base를 그만큼 줄인다. 너무 크면 자이로 값을 믿지 않는다"""
+    limit = cfg["run_all"]["heading_fix_max_deg"]
+    if not heading or abs(heading) > limit:
+        if heading:
+            mission.log(f"방향 {heading:+.1f}°가 너무 커서 팔 보정 안 함 (최대 {limit}°)")
+        return
+    for name in transfer_poses(cfg):
+        if name not in FIXED_POSES:
+            p = cfg["poses"][name]
+            p["base"] = max(0, min(180, round(p["base"] - heading)))
+    mission.log(f"차 방향 {heading:+.1f}°만큼 팔 base 보정")
 
 
 # =====================================================================
@@ -227,13 +244,14 @@ def main():
             hw.reset_clock()
             mission.log(f"출발: {first}")
 
-            drive_to_line(gyro, lines)
+            heading = drive_to_line(gyro, lines)
             hw.lock_wheels()                         # 이후 바퀴 명령 무시 (팔 동작 중 이동 = 실격)
             target = cfg["stop"]["target_cm"]
             distance = hw.get_distance()
             result = judge(distance, target)
             hw.record_event("stop_judged", {"distance_cm": distance, "target_cm": target, "result": result})
             mission.log(f"예상 판정: {result} (거리 {distance:.1f}cm)")
+            apply_heading(cfg, heading)
 
         move_objects(first)
         hw.beep()

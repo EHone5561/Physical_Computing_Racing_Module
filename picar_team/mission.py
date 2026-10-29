@@ -125,7 +125,8 @@ class ApproachFilter:
 class StallBoost:
     """느린 출력에서 바퀴가 못 구르면(배터리·바닥 마찰, 특히 멈춘 상태에서 출발할 때) 출력을 조금씩 올린다.
     stall_s 동안 거리가 1cm도 줄지 않으면 stall_step만큼 더하고, 최대 stall_max_extra까지.
-    한 번 올린 값은 유지한다 (그만큼 있어야 굴러간다는 뜻이므로)"""
+    한 번 구르기 시작하면 더 적은 힘으로도 굴러가므로, 1cm 나갈 때마다 stall_step씩 다시 뺀다
+    (올린 출력 그대로 정지선에 들어가면 미끄러져 넘는다: 실주행 40%로 브레이크 30.7cm → 25.8cm)"""
 
     def __init__(self):
         m = hw.cfg["motor"]
@@ -135,12 +136,18 @@ class StallBoost:
     def speed(self, base, d):
         now = time.monotonic()
         if self.ref_d is None or d < self.ref_d - 1.0:
+            if self.ref_d is not None:
+                self.extra = max(0, self.extra - self.step)
             self.ref_d, self.ref_t = d, now
         elif now - self.ref_t > self.wait and self.extra < self.limit:
             self.extra = min(self.limit, self.extra + self.step)
             self.ref_t = now
             log(f"거리가 줄지 않음 → 출력 +{self.extra}%")
         return base + self.extra
+
+    def brake_lead(self):
+        """출력을 올린 만큼 더 미끄러지므로 브레이크를 일찍 건다 (cm)"""
+        return self.extra * hw.cfg["motor"]["boost_brake_cm_per_pct"]
 
 
 def steady_distance(n=5, gap_s=0.03):
@@ -176,7 +183,7 @@ def drive_and_stop():
     slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
     while True:
         d = filt.update(hw.get_distance())
-        if d <= brake_at:
+        if d <= brake_at + boost.brake_lead():
             hw.stop()
             break
         slow = slow or d <= st["slow_down_cm"]

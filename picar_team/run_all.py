@@ -18,7 +18,8 @@ config.json
 - grip.open / grip.close: 반드시 실측해서 넣는다 (비어 있으면 실행하지 않는다)
 - run_all.wrist_flip: wrist 값을 올렸을 때 목이 내려가는 조립이면 true (모든 자세의 wrist를 180-값으로 바꿔 쓴다)
 - run_all.use_gyro: 자이로 직진 보정 사용 (실패하면 보정 없이 주행)
-- run_all.carry_move_s: 스펀지를 들고 움직이는 한 동작의 시간 (흔들려 놓치지 않게 천천히)
+- run_all.carry_move_s: 스펀지를 들고 들어 올리거나 위로 빠지는 한 동작의 시간
+- run_all.swing_move_s: 스펀지를 든 채 반대쪽 칸 위로 회전하는 시간 (빠르면 흔들려 놓칠 수 있다)
 - run_all.place_press: 놓는 자세(_place)에 더해 착지 높이를 정하는 양. 공중에서 떨어지면 arm·wrist를 같이 +3씩
 - run_all.place_move_s: 들어 올린 높이에서 착지 높이까지 내려가는 시간 (짧을수록 빠르게)
 - run_all.place_settle_s: 다 내려간 뒤 집게를 열기 전 기다리는 시간
@@ -107,15 +108,14 @@ def pick(side, slot):
 
 
 def place(side, slot):
-    """같은 높이로 base만 돌림 → 놓을 칸 위 → 착지 높이까지 한 번에 빠르게 내림 → 살짝 열기 → 위로 빠짐.
+    """놓을 칸 위로 한 번에 회전 → 착지 높이까지 한 번에 빠르게 내림 → 살짝 열기 → 위로 빠짐.
     공중에서 집게를 열면 스펀지가 던져지듯 떨어지므로, 바닥(착지 높이)까지 쥔 채로 내려간 뒤
     움직임이 멎으면 조금만(release) 천천히 연다. 완전히 여는 것은 다음 집기 때 한다.
+    회전: 들어 올린 자세끼리는 arm·wrist가 비슷해 높이가 거의 그대로이므로 base와 함께 swing_move_s 동안 움직인다.
     착지 높이 = 놓는 자세(_place) + place_press. 내려가는 시간 = place_move_s"""
     ra = hw.cfg["run_all"]
-    target = mission.pose(f"{side}_{slot}_carry")
     hw.set_phase(f"{side}_{slot}_swing")
-    hw.move_servos({"base": target["base"]}, ra["carry_move_s"])
-    move(f"{side}_{slot}_carry", slow=True)
+    hw.move_servos(mission.pose(f"{side}_{slot}_carry"), ra["swing_move_s"])
     land = dict(mission.pose(f"{side}_{slot}_place"))
     for joint in ("arm", "wrist"):
         land[joint] = max(0, min(180, land[joint] + ra["place_press"][joint]))

@@ -55,7 +55,8 @@
   "run_all": {
     "use_gyro": true,
     "wrist_flip": false,
-    "carry_move_s": 1.0,
+    "carry_move_s": 0.6,
+    "swing_move_s": 0.7,
     "reach_adjust": { "arm": 0, "wrist": 0 },
     "place_press": { "arm": 18, "wrist": 18 },
     "place_move_s": 0.4,

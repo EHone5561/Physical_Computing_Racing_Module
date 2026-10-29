@@ -44,7 +44,7 @@
 
   "centering": {
     "gyro": { "address": 104, "axis": "z", "sign": 1, "min_calib_samples": 50 },
-    "steer_sign": 1,
+    "steer_sign": -1,
     "heading_gain": 2.0,
     "lateral_gain_deg_per_cm": 1.5,
     "max_heading_fix_deg": 6,

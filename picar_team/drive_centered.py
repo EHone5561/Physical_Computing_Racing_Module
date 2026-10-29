@@ -71,6 +71,11 @@ class Gyro:
             last = now
             time.sleep(0.005)
 
+    def restart_calibration(self):
+        """영점 표본을 버리고 다시 모은다. 팔이 움직이는 동안 모인 값은 흔들림이 섞여 영점이 틀어진다"""
+        with self.lock:
+            self.bias_sum, self.bias_n, self.bias = 0.0, 0, None
+
     def start_tracking(self):
         """지금을 방향 0°로 하고 적분을 시작한다. 영점 표본이 부족하면 오류"""
         with self.lock:
@@ -128,6 +133,7 @@ def drive_and_stop_centered(gyro, lines):
 
     d0 = d_prev = hw.get_distance()
     filt = mission.ApproachFilter(d0)
+    boost = mission.StallBoost()
     slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
     lateral = 0.0
     line_prev = lines.read() if lines else None
@@ -149,7 +155,7 @@ def drive_and_stop_centered(gyro, lines):
         if abs(steer - hw.servo_angles["steer"]) >= 0.5:   # 작은 변화는 무시 (서보 떨림·기록량 줄이기)
             hw.set_servo("steer", steer, show=False)
         slow = slow or d <= st["slow_down_cm"]
-        hw.drive(m["slow_speed"] if slow else m["max_speed"])
+        hw.drive(boost.speed(m["slow_speed"] if slow else m["max_speed"], d))
         if lines:
             now = lines.read()
             if now != line_prev:
@@ -189,6 +195,8 @@ def main():
         hw.set_phase("wait_start_qr")
         if mission.pose_ready("qr_view"):
             hw.move_servos(mission.pose("qr_view"))
+            time.sleep(0.3)                           # 팔 흔들림이 멎은 뒤부터 영점을 잰다
+            gyro.restart_calibration()
         mission.log(f"출발 위치 거리 {hw.get_distance():.1f}cm (출발선이면 모니터까지 약 87cm)")
         mission.log("QR 대기 (이 동안 로봇을 건드리지 마세요: 자이로 영점 측정 중)")
 

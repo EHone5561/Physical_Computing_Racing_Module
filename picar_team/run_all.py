@@ -215,6 +215,9 @@ def main():
             gyro, lines = start_gyro()   # QR을 기다리는 동안 자이로 영점을 모은다
             hw.set_phase("wait_start_qr")
             move("qr_view")
+            if gyro:
+                time.sleep(0.3)               # 팔 흔들림이 멎은 뒤부터 영점을 잰다
+                gyro.restart_calibration()
             mission.log(f"출발 위치 거리 {hw.get_distance():.1f}cm (출발선이면 모니터까지 약 87cm)")
             mission.log("QR 대기" + (" (로봇을 건드리지 마세요: 자이로 영점 측정 중)" if gyro else ""))
             first = mission.wait_start_qr()

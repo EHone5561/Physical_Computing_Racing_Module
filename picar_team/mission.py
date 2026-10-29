@@ -122,6 +122,27 @@ class ApproachFilter:
         return min(self.recent)
 
 
+class StallBoost:
+    """느린 출력에서 바퀴가 못 구르면(배터리·바닥 마찰, 특히 멈춘 상태에서 출발할 때) 출력을 조금씩 올린다.
+    stall_s 동안 거리가 1cm도 줄지 않으면 stall_step만큼 더하고, 최대 stall_max_extra까지.
+    한 번 올린 값은 유지한다 (그만큼 있어야 굴러간다는 뜻이므로)"""
+
+    def __init__(self):
+        m = hw.cfg["motor"]
+        self.wait, self.step, self.limit = m["stall_s"], m["stall_step"], m["stall_max_extra"]
+        self.extra, self.ref_d, self.ref_t = 0, None, time.monotonic()
+
+    def speed(self, base, d):
+        now = time.monotonic()
+        if self.ref_d is None or d < self.ref_d - 1.0:
+            self.ref_d, self.ref_t = d, now
+        elif now - self.ref_t > self.wait and self.extra < self.limit:
+            self.extra = min(self.limit, self.extra + self.step)
+            self.ref_t = now
+            log(f"거리가 줄지 않음 → 출력 +{self.extra}%")
+        return base + self.extra
+
+
 def steady_distance(n=5, gap_s=0.03):
     """멈춘 상태에서 여러 번 재서 중앙값 (튀는 값 하나에 흔들리지 않게)"""
     values = []
@@ -151,6 +172,7 @@ def drive_and_stop():
     t_start = time.time()
     last_print = 0.0
     filt = ApproachFilter(hw.get_distance())
+    boost = StallBoost()
     slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
     while True:
         d = filt.update(hw.get_distance())
@@ -158,7 +180,7 @@ def drive_and_stop():
             hw.stop()
             break
         slow = slow or d <= st["slow_down_cm"]
-        hw.drive(m["slow_speed"] if slow else m["max_speed"])
+        hw.drive(boost.speed(m["slow_speed"] if slow else m["max_speed"], d))
         if time.time() - last_print >= 0.1:          # 0.1초마다 속도·거리 출력
             hw.show_status("drive")
             last_print = time.time()
@@ -178,6 +200,7 @@ def fine_adjust():
     target = st["target_cm"]
     hw.set_phase("fine_adjust")
     d = hw.last_distance
+    speed, before = m["fine_speed"], None
     for _ in range(st["fine_max_tries"]):
         time.sleep(st["settle_s"])
         d = steady_distance()
@@ -185,8 +208,13 @@ def fine_adjust():
         hw.show_status("fine")
         if abs(err) <= st["tolerance_cm"]:
             break
-        hw.drive(m["fine_speed"] if err > 0 else -m["fine_speed"])
-        time.sleep(m["fine_pulse_s"])
+        # 지난 펄스에 거의 안 움직였으면 (멈춘 상태에서는 바퀴가 잘 안 구른다) 출력을 올린다
+        if before is not None and abs(d - before) < 0.3 and speed < m["fine_speed"] + m["stall_max_extra"]:
+            speed += m["stall_step"]
+            log(f"미세 보정이 안 움직임 → 출력 {speed}%")
+        before = d
+        hw.drive(speed if err > 0 else -speed)
+        time.sleep(m["fine_pulse_s"] * m["fine_speed"] / speed)   # 출력을 올린 만큼 짧게 (지나치지 않게)
         hw.stop()
     else:
         time.sleep(st["settle_s"])   # 마지막 보정 뒤의 위치를 다시 잰다

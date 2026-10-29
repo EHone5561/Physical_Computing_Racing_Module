@@ -28,7 +28,10 @@
     "slow_speed": 20,
     "fine_speed": 25,
     "fine_pulse_s": 0.2,
-    "max_drive_s": 12.0
+    "max_drive_s": 12.0,
+    "stall_s": 0.6,
+    "stall_step": 5,
+    "stall_max_extra": 25
   },
 
   "sonar": { "trig": 23, "echo": 24, "queue_len": 3, "max_distance_m": 2.0 },

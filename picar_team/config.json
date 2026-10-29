@@ -95,7 +95,7 @@
     "right_front_place": { "base": null, "arm": null, "wrist": null },
     "right_back_above":  { "base": null, "arm": null, "wrist": null },
     "right_back_down":   { "base": null, "arm": null, "wrist": null },
-    "right_back_carry":  { "base": 3  , "arm": 128, "wrist": 130 },
-    "right_back_place":  { "base": 3  , "arm": 154, "wrist": 130 }
+    "right_back_carry":  { "base": 0  , "arm": 128, "wrist": 130 },
+    "right_back_place":  { "base": 0  , "arm": 154, "wrist": 130 }
   }
 }

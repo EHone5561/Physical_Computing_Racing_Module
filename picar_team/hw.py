@@ -21,6 +21,7 @@ import math
 import threading
 
 from practice_logger import PracticeRecorder, settings as recording_settings
+import qr_read
 
 # Adeept 코드와 같은 라이브러리 (picar source code/Servo180Degree.py 14~18행, Move.py 8~11행)
 from board import SCL, SDA
@@ -43,7 +44,6 @@ motor_left = None     # M1
 motor_right = None    # M2
 sonar = None          # 초음파
 camera = None         # USB 웹캠
-qr_detector = None    # QR 검출기
 buzzer = None         # 완료 신호용 (없어도 동작)
 
 wheels_locked = False  # True가 되면 drive()가 바퀴를 절대 움직이지 않는다 (정지 후 실격 방지)
@@ -142,7 +142,7 @@ def init(use_camera=True, recording_mode="manual"):
     """모든 하드웨어를 한 번만 준비한다. 프로그램 시작 때 1회 호출.
     use_camera=False: 카메라 없이 준비 (서보·모터·초음파만 테스트할 때)
     """
-    global cfg, pca, motor_left, motor_right, sonar, camera, qr_detector, buzzer
+    global cfg, pca, motor_left, motor_right, sonar, camera, buzzer
     global recorder, phase, _distance_thread, wheels_locked, current_speed
     global last_distance, distance_read_at, distance_error
     cfg = load_config()
@@ -189,14 +189,13 @@ def init(use_camera=True, recording_mode="manual"):
     # 5) USB 웹캠 + QR 검출기
     if use_camera:
         c = cfg["camera"]
-        camera = cv2.VideoCapture(c["index"])
+        camera = cv2.VideoCapture(c["index"], cv2.CAP_V4L2)   # GStreamer는 해상도·버퍼 설정을 무시한다
         if not camera.isOpened():
             raise RuntimeError(f"카메라 {c['index']}번을 열 수 없습니다. (ls /dev/video* 로 번호 확인)")
         camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, c["width"])
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, c["height"])
         camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)    # 오래된 프레임이 쌓이지 않게 (지원 안 되면 무시됨)
-        qr_detector = cv2.QRCodeDetector()
 
     # 6) 부저 (Buzzer.py: GPIO18). 실패해도 미션에는 지장 없음
     try:
@@ -373,25 +372,19 @@ def get_distance():
 # =====================================================================
 def get_frame(fresh=False):
     """웹캠 프레임 1장(BGR 배열). 실패하면 None.
-    fresh=True: 쌓여 있던 프레임 하나를 버리고 새로 찍은 것을 받는다 (팔이 막 멈춘 직후에 사용)
+    fresh=True: 쌓여 있던 프레임을 버리고 새로 찍은 것을 받는다 (팔이 막 멈춘 직후, QR 대기 중에 사용)
     """
     if fresh:
-        camera.grab()
+        for _ in range(2):
+            camera.grab()
     ok, frame = camera.read()
     return frame if ok else None
 
 
-def read_qrs(frame):
-    """frame 안의 QR들을 [(문자열, 중심x좌표), ...]로 돌려준다. 없으면 []."""
-    ok, texts, points, _ = qr_detector.detectAndDecodeMulti(frame)
-    result = []
-    if ok and points is not None:
-        for text, pts in zip(texts, points):
-            text = text.strip()
-            if text:
-                cx = float(sum(p[0] for p in pts) / len(pts))   # 꼭짓점 4개의 x 평균
-                result.append((text, cx))
-    return result
+def read_qrs(frame, budget_s=0.25):
+    """frame 안의 QR들을 [(문자열, 중심x좌표), ...]로 돌려준다. 없으면 [].
+    흐리거나 대비가 낮아도 읽도록 여러 방법을 시도한다 (qr_read.py). budget_s = 한 프레임에 쓸 최대 시간"""
+    return qr_read.read_qrs(frame, budget_s)
 
 
 # =====================================================================
@@ -464,13 +457,24 @@ if __name__ == "__main__":
                 show_status("dist")
                 time.sleep(0.1)
         elif test == "qr":
+            # 1초마다 웹캠 화면을 qr_view.jpg로 저장한다 (VS Code에서 열어 QR이 어떻게 보이는지 확인)
+            snap = os.path.join(os.path.dirname(CONFIG_PATH), "qr_view.jpg")
+            last_snap = 0.0
+            print(f"zbar 사용: {'예' if qr_read.pyzbar else '아니오 (sudo apt install libzbar0 && pip install pyzbar)'}")
             while True:
-                frame = get_frame()
-                if frame is not None:
-                    qrs = read_qrs(frame)
-                    if qrs:
-                        print(f"[{elapsed():6.2f}s]", qrs, flush=True)
-                        record_event("qr", {"qrs": qrs})
+                frame = get_frame(fresh=True)
+                if frame is None:
+                    print("프레임 없음 — 카메라 연결 확인", flush=True)
+                    continue
+                t = time.monotonic()
+                qrs = read_qrs(frame)
+                took = (time.monotonic() - t) * 1000
+                print(f"[{elapsed():6.2f}s] {frame.shape[1]}x{frame.shape[0]} {took:4.0f}ms", qrs or "-", flush=True)
+                if qrs:
+                    record_event("qr", {"qrs": qrs})
+                if time.monotonic() - last_snap > 1:
+                    cv2.imwrite(snap, frame)
+                    last_snap = time.monotonic()
     except KeyboardInterrupt:
         outcome = "interrupted"
     except Exception as exc:

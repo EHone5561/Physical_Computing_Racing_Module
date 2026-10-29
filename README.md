@@ -13,6 +13,7 @@
 ├── picar_team/
 │   ├── config.json       # 실험으로 조정할 수치와 하드웨어 설정
 │   ├── hw.py             # 서보·모터·초음파·USB 웹캠 제어와 단독 테스트
+│   ├── qr_read.py        # 흐리거나 대비가 낮아도 읽는 QR 인식 (zbar 있으면 사용)
 │   ├── mission.py        # 실제 미션 순서와 QR 판별
 │   ├── drive.py          # 미션 1~2만: 출발 QR → 직진 → 정지선 정지
 │   ├── drive_centered.py # drive.py + 자이로 직진 보정, 바닥 센서 기록

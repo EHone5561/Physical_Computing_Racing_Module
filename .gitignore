@@ -9,6 +9,7 @@ venv/
 logs/
 *.log
 practices/
+qr_view.jpg
 .test_tmp/
 .record-request.json
 .record-response.json

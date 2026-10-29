@@ -71,10 +71,11 @@ def wait_start_qr():
     if sc["require_blank_first"]:
         blank, warned = 0, False
         while blank < sc["blank_frames"]:
-            frame = hw.get_frame()
+            frame = hw.get_frame(fresh=True)
             if frame is None:
                 continue
-            if start_direction(hw.read_qrs(frame)) is None:
+            # 빈 화면 확인은 빠르게 (느리게 읽다가 QR이 떠 버리면 '남아 있는 QR'로 오해한다)
+            if start_direction(hw.read_qrs(frame, budget_s=0.05)) is None:
                 blank += 1
             else:
                 blank = 0
@@ -83,16 +84,19 @@ def wait_start_qr():
                     warned = True
         log("화면 비어 있음 확인 → 시작 QR 대기")
 
-    # 같은 값이 confirm_frames 프레임 연속 나와야 확정 (오인식 방지)
-    last, count = None, 0
+    # 같은 값이 confirm_frames 번 나와야 확정 (오인식 방지). 사이에 몇 프레임 놓치는 것은 봐준다
+    last, count, misses = None, 0, 0
     while True:
-        frame = hw.get_frame()
+        frame = hw.get_frame(fresh=True)
         if frame is None:
             continue
         d = start_direction(hw.read_qrs(frame))
         if d is None:
-            last, count = None, 0
+            misses += 1
+            if misses > sc.get("max_misses", 3):
+                last, count = None, 0
             continue
+        misses = 0
         count = count + 1 if d == last else 1
         last = d
         if count >= sc["confirm_frames"]:

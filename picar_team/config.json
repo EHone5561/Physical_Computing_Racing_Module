@@ -66,8 +66,8 @@
     "confirm": true
   },
 
-  "camera": { "index": 0, "width": 640, "height": 480 },
-  "start_qr": { "confirm_frames": 2, "require_blank_first": true, "blank_frames": 5 },
+  "camera": { "index": 0, "width": 1280, "height": 720 },
+  "start_qr": { "confirm_frames": 2, "require_blank_first": true, "blank_frames": 3, "max_misses": 3 },
 
   "look": {
     "use_qr": false,

@@ -23,7 +23,8 @@ config.json
 - run_all.place_press: 놓는 자세(_place)에 더해 착지 높이를 정하는 양. 공중에서 떨어지면 arm·wrist를 같이 +3씩
 - run_all.place_move_s: 들어 올린 높이에서 착지 높이까지 내려가는 시간 (짧을수록 빠르게)
 - run_all.place_settle_s: 다 내려간 뒤 집게를 열기 전 기다리는 시간
-- grip.release: 놓을 때 여는 각도. 완전히 열면(open) 스펀지를 튕길 수 있어 조금만 연다
+- grip.release: 놓을 때 여는 각도. 완전히 열면(open) 스펀지를 튕길 수 있어 그보다 조금 덜 연다
+- run_all.release_hold_s: 놓을 때 연 채로 기다리는 시간. 스펀지가 집게에 붙어 딸려 오면 늘린다
 - run_all.reach_adjust: 집기·놓기 자세 전체에 더할 값. 덜 뻗으면 arm을 +3~5씩, 집게가 아래로 꺾여 있으면 wrist를 +5~10씩
 - wrist 값은 서보 90 = 목이 수평보다 약 10° 아래가 되도록 서보를 다시 끼운 기준이다
 """
@@ -98,9 +99,11 @@ def move(name, slow=False):
 
 
 def pick(side, slot):
-    """위 → 열기 → 내려감 → 닫기 → 들어 올림. 들어 올릴 때부터는 스펀지를 들고 있으니 천천히"""
-    move(f"{side}_{slot}_above")
-    hw.grip("open")
+    """위로 가면서 열기 → 내려감 → 닫기 → 들어 올림. 들어 올릴 때부터는 스펀지를 들고 있으니 천천히.
+    집게를 위 자세로 가는 동작과 함께 열어, 위에서 열기를 기다리며 멈추는 시간을 없앤다."""
+    name = f"{side}_{slot}_above"
+    hw.set_phase(name)
+    hw.move_servos({**mission.pose(name), "grip": hw.cfg["grip"]["open"]})
     move(f"{side}_{slot}_down")
     hw.grip("close")
     move(f"{side}_{slot}_carry", slow=True)
@@ -123,6 +126,7 @@ def place(side, slot):
     hw.move_servos(land, ra["place_move_s"])
     time.sleep(ra["place_settle_s"])          # 팔 흔들림이 멎은 뒤 연다
     hw.grip("release")
+    time.sleep(ra["release_hold_s"])          # 집게에 붙은 스펀지가 떨어질 때까지 연 채로 기다린다
     move(f"{side}_{slot}_carry", slow=True)
     mission.log(f"{side} {slot} 놓기 완료")
 

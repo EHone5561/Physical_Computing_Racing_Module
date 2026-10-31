@@ -23,7 +23,7 @@ config.json
 - run_all.carry_move_s: 스펀지를 쥔 뒤 들어 올리는 한 동작의 시간
 - run_all.empty_move_dps: 빈손 이동(집으러 가기·내려가기, 놓고 위로 빠지기, 마지막 정리) 속도 °/s.
   멈춤 없이 이어서 움직인다. 집으러 내려갈 때 스펀지를 밀면 낮춘다
-- run_all.swing_move_s: 스펀지를 든 채 반대쪽 칸 위로 회전하는 시간 (빠르면 흔들려 놓칠 수 있다)
+- run_all.swing_move_s: 스펀지를 든 채 반대쪽 칸 위로 회전하는 시간. 천천히 출발·멈춤한다 (빠르면 흔들려 놓칠 수 있다)
 - run_all.place_press: 놓는 자세(_place)에 더해 착지 높이를 정하는 양. 공중에서 떨어지면 arm·wrist를 같이 +3씩
 - run_all.place_move_s: 들어 올린 높이에서 착지 높이까지 내려가는 시간 (짧을수록 빠르게)
 - run_all.place_settle_s: 다 내려간 뒤 집게를 열기 전 기다리는 시간
@@ -149,7 +149,8 @@ def place(side, slot):
     hw.set_phase(f"{side}_{slot}_swing")
     carry = mission.pose(f"{side}_{slot}_carry")
     # 들어 올린 높이 그대로 base만 돌린다 (함께 움직이면 중간에 낮아져 옆 스펀지를 볼링처럼 친다)
-    hw.move_servos({"base": carry["base"]}, ra["swing_move_s"])
+    # 빠르게 돌려도 스펀지가 덜 흔들리게 천천히 출발·멈춤 (가운데 속도는 평균의 1.5배)
+    hw.move_servos({"base": carry["base"]}, ra["swing_move_s"], ease=True)
     land = dict(mission.pose(f"{side}_{slot}_place"))
     for joint in ("arm", "wrist"):
         land[joint] = max(0, min(180, land[joint] + ra["place_press"][joint]))

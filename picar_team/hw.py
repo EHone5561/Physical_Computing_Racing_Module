@@ -261,10 +261,11 @@ def set_servo(name, angle, show=True):
         show_status(name)
 
 
-def move_servos(target, duration=None):
+def move_servos(target, duration=None, ease=False):
     """여러 서보를 '동시에' 부드럽게 이동하고, 도착하면 돌아온다.
     target 예: {"base": 120, "arm": 60, "wrist": 90}
     duration: 이동 시간(초). None이면 cfg["servo_move_time"], 0이면 즉시 이동
+    ease: True면 천천히 출발해 가운데서 빠르고 천천히 멈춘다 (급출발·급정지가 없어 들고 있는 물체가 덜 흔들린다)
     원리: 출발각→목표각을 여러 단계로 나눠 조금씩 이동 (Servo180Degree.py 33~35행)
           모든 관절을 같은 단계 수로 나누므로 동시에 출발·도착한다
     """
@@ -276,7 +277,10 @@ def move_servos(target, duration=None):
     start = {n: servo_angles.get(n, target[n]) for n in target}
     for i in range(1, steps + 1):
         for n in target:
-            a = start[n] + (target[n] - start[n]) * i / steps
+            f = i / steps
+            if ease:
+                f = f * f * (3 - 2 * f)
+            a = start[n] + (target[n] - start[n]) * f
             set_servo(n, a, show=False)
         if steps > 1:
             time.sleep(step_s)

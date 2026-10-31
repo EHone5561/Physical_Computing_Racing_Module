@@ -15,7 +15,7 @@
     "steer": [60, 120], "base": [0, 180], "arm": [0, 180], "wrist": [0, 180], "grip": [0, 180]
   },
   "steer_center": 90,
-  "grip": { "open": 120, "close": 30, "release": 105, "release_wide": 125 },
+  "grip": { "open": 150, "close": 30, "release": 105, "release_wide": 125 },
   "servo_move_time": 0.5,
   "servo_step_s": 0.02,
   "grip_move_s": 0.8,

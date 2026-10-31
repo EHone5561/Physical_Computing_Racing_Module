@@ -5,7 +5,9 @@ run_all.py — 미션 전체를 명령 하나로: 출발 QR → 직진(자이로
     python3 run_all.py              # 전체 미션 (로봇을 출발선에 놓고)
     python3 run_all.py arm left     # 팔만: 지금 자리(정지선 위)에서 바퀴를 잠그고 LEFT 순서로 옮기기
     python3 run_all.py arm right    # 팔만: RIGHT 순서
+    python3 run_all.py drive        # 주행만: QR 없이 Enter 후 2초 뒤 출발 → 정지선 정지 (팔 동작 없음)
     python3 run_all.py --yes        # 시작 전 확인(Enter) 없이 바로
+    python3 run_all.py reverse      # 반대 배치: 왼쪽 물체가 앞 칸, 오른쪽 물체가 뒤 칸 (arm left reverse 처럼 붙여 쓴다)
 
 옮기는 순서 (mission.py와 같음, 대회 배치 고정: 왼쪽 물체 뒤 칸, 오른쪽 물체 앞 칸)
   1) QR 쪽 물체를 집어 반대쪽 빈 칸에 놓는다  2) 반대쪽 물체를 집어 처음 쪽 빈 칸에 놓는다
@@ -24,8 +26,9 @@ config.json
 - run_all.place_move_s: 들어 올린 높이에서 착지 높이까지 내려가는 시간 (짧을수록 빠르게)
 - run_all.place_settle_s: 다 내려간 뒤 집게를 열기 전 기다리는 시간
 - grip.release: 놓을 때 여는 각도. 완전히 열면(open) 스펀지를 튕길 수 있어 그보다 조금 덜 연다
-- grip.release_wide / run_all.wide_release: 이 목록의 칸에 놓을 때는 release 대신 release_wide까지 연다
+- run_all.release_by_slot: 칸마다 놓을 때 여는 각도 (예: {"right_back": 180}). 없는 칸은 grip.release
 - run_all.release_hold_s: 놓을 때 연 채로 기다리는 시간. 스펀지가 집게에 붙어 딸려 오면 늘린다
+- poses_reverse / run_all.release_by_slot_reverse: reverse 배치 전용 자세와 놓을 때 여는 각도 (기본 배치와 따로 관리)
 - run_all.reach_adjust: 집기·놓기 자세 전체에 더할 값. 덜 뻗으면 arm을 +3~5씩, 집게가 아래로 꺾여 있으면 wrist를 +5~10씩
 - wrist 값은 서보 90 = 목이 수평보다 약 10° 아래가 되도록 서보를 다시 끼운 기준이다
 """
@@ -58,6 +61,16 @@ def check_config(cfg):
         if p is None or any(v is None for v in p.values()):
             missing.append(f"poses.{name}")
     return missing
+
+
+def apply_reverse(cfg):
+    """반대 배치(왼쪽 물체가 앞 칸, 오른쪽 물체가 뒤 칸)로 바꾼다 (메모리에서만).
+    기본 배치와 완전히 따로 관리한다: 집기·놓기 자세는 poses_reverse, 놓을 때 여는 각도는
+    run_all.release_by_slot_reverse 값만 쓴다. 기본 배치(poses)를 고쳐도 reverse는 바뀌지 않는다"""
+    cfg["poses"].update(cfg["poses_reverse"])
+    cfg["run_all"]["release_by_slot"] = cfg["run_all"]["release_by_slot_reverse"]
+    place = cfg["look"]["default_place"]
+    cfg["look"]["default_place"] = {"left": place["right"], "right": place["left"]}
 
 
 def apply_wrist_flip(cfg):
@@ -115,19 +128,22 @@ def place(side, slot):
     """놓을 칸 위로 한 번에 회전 → 착지 높이까지 한 번에 빠르게 내림 → 살짝 열기 → 위로 빠짐.
     공중에서 집게를 열면 스펀지가 던져지듯 떨어지므로, 바닥(착지 높이)까지 쥔 채로 내려간 뒤
     움직임이 멎으면 조금만(release) 천천히 연다. 완전히 여는 것은 다음 집기 때 한다.
-    회전: 들어 올린 자세끼리는 arm·wrist가 비슷해 높이가 거의 그대로이므로 base와 함께 swing_move_s 동안 움직인다.
+    회전: 집은 뒤 들어 올린 높이(_carry) 그대로 base만 swing_move_s 동안 돌린 뒤 놓을 칸 위 자세로 바꾼다.
     착지 높이 = 놓는 자세(_place) + place_press. 내려가는 시간 = place_move_s"""
     ra = hw.cfg["run_all"]
     hw.set_phase(f"{side}_{slot}_swing")
-    hw.move_servos(mission.pose(f"{side}_{slot}_carry"), ra["swing_move_s"])
+    carry = mission.pose(f"{side}_{slot}_carry")
+    # 들어 올린 높이 그대로 base만 돌린다 (함께 움직이면 중간에 낮아져 옆 스펀지를 볼링처럼 친다)
+    hw.move_servos({"base": carry["base"]}, ra["swing_move_s"])
+    move(f"{side}_{slot}_carry", slow=True)
     land = dict(mission.pose(f"{side}_{slot}_place"))
     for joint in ("arm", "wrist"):
         land[joint] = max(0, min(180, land[joint] + ra["place_press"][joint]))
     hw.set_phase(f"{side}_{slot}_land")
     hw.move_servos(land, ra["place_move_s"])
     time.sleep(ra["place_settle_s"])          # 팔 흔들림이 멎은 뒤 연다
-    wide = f"{side}_{slot}" in ra["wide_release"]   # 잘 안 놓이는 칸은 더 넓게 연다
-    hw.grip("release_wide" if wide else "release")
+    angle = ra["release_by_slot"].get(f"{side}_{slot}")   # 잘 안 놓이는 칸은 더 넓게 연다
+    hw.grip("release", angle)
     time.sleep(ra["release_hold_s"])          # 집게에 붙은 스펀지가 떨어질 때까지 연 채로 기다린다
     move(f"{side}_{slot}_carry", slow=True)
     mission.log(f"{side} {slot} 놓기 완료")
@@ -195,16 +211,21 @@ def apply_heading(cfg, heading):
 # 전체 흐름
 # =====================================================================
 def main():
-    args = [a for a in sys.argv[1:] if a != "--yes"]
+    reverse = "reverse" in sys.argv
+    args = [a for a in sys.argv[1:] if a not in ("--yes", "reverse")]
     arm_only = bool(args) and args[0] == "arm"
+    drive_only = bool(args) and args[0] == "drive"
     if arm_only and (len(args) < 2 or args[1] not in ("left", "right")):
         print("사용법: python3 run_all.py arm left  또는  python3 run_all.py arm right")
         return
-    if args and not arm_only:
+    if args and not (arm_only or drive_only):
         print(__doc__)
         return
 
     cfg = hw.load_config()
+    if reverse:
+        apply_reverse(cfg)
+        print("반대 배치: 왼쪽 물체 앞 칸 → 오른쪽 앞 칸, 오른쪽 물체 뒤 칸 → 왼쪽 뒤 칸")
     missing = check_config(cfg)
     if missing:
         print(f"비어 있는 값 {len(missing)}개 — config.json에 채운 뒤 다시 실행하세요:")
@@ -221,7 +242,8 @@ def main():
     outcome, error = "completed", None
     gyro = lines = None
     try:
-        hw.init(use_camera=not arm_only, recording_mode="arm_only" if arm_only else "run_all")
+        mode = "arm_only" if arm_only else "drive_only" if drive_only else "run_all"
+        hw.init(use_camera=not (arm_only or drive_only), recording_mode=mode)
         hw.cfg = cfg   # wrist_flip을 적용한 설정으로 이후 모든 동작을 한다
         if arm_only:
             first = args[1]
@@ -236,8 +258,14 @@ def main():
                 time.sleep(0.3)               # 팔 흔들림이 멎은 뒤부터 영점을 잰다
                 gyro.restart_calibration()
             mission.log(f"출발 위치 거리 {hw.get_distance():.1f}cm (출발선이면 모니터까지 약 87cm)")
-            mission.log("QR 대기" + (" (로봇을 건드리지 마세요: 자이로 영점 측정 중)" if gyro else ""))
-            first = mission.wait_start_qr()
+            if not drive_only:
+                mission.log("QR 대기" + (" (로봇을 건드리지 마세요: 자이로 영점 측정 중)" if gyro else ""))
+            if drive_only:
+                first = "left"
+                mission.log("주행만 시험: QR 없이 2초 뒤 출발 (로봇을 건드리지 마세요)")
+                time.sleep(2)                 # 자이로 영점을 모으는 시간
+            else:
+                first = mission.wait_start_qr()
             if gyro:
                 gyro.start_tracking()
             hw.record_event("start_qr", {"direction": first})
@@ -252,6 +280,11 @@ def main():
             hw.record_event("stop_judged", {"distance_cm": distance, "target_cm": target, "result": result})
             mission.log(f"예상 판정: {result} (거리 {distance:.1f}cm)")
             apply_heading(cfg, heading)
+            if drive_only:
+                hw.beep()
+                hw.set_phase("done")
+                mission.log("주행만 시험 끝")
+                return
 
         move_objects(first)
         hw.beep()

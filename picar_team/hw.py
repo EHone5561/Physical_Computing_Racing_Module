@@ -45,6 +45,7 @@ motor_right = None    # M2
 sonar = None          # 초음파
 camera = None         # USB 웹캠
 buzzer = None         # 완료 신호용 (없어도 동작)
+frame_width = None    # 웹캠이 실제로 주는 가로 해상도 (init에서 채움)
 
 wheels_locked = False  # True가 되면 drive()가 바퀴를 절대 움직이지 않는다 (정지 후 실격 방지)
 current_speed = 0      # 마지막으로 보낸 바퀴 속도 (-100~100)
@@ -195,7 +196,9 @@ def init(use_camera=True, recording_mode="manual"):
         camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, c["width"])
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, c["height"])
-        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)    # 오래된 프레임이 쌓이지 않게 (지원 안 되면 무시됨)
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        global frame_width
+        frame_width = int(camera.get(cv2.CAP_PROP_FRAME_WIDTH)) or c["width"]   # 카메라가 해상도를 거부하면 실제 값    # 오래된 프레임이 쌓이지 않게 (지원 안 되면 무시됨)
 
     # 6) 부저 (Buzzer.py: GPIO18). 실패해도 미션에는 지장 없음
     try:
@@ -280,11 +283,11 @@ def move_servos(target, duration=None):
     show_status("arm")
 
 
-def grip(state):
-    """state = "open" 또는 "close" → cfg["grip"][state] 각도로 grip_move_s 동안 천천히 움직인 뒤 grip_wait_s 대기.
+def grip(state, angle=None):
+    """state = "open" 또는 "close" → cfg["grip"][state] 각도(angle을 주면 그 각도)로 grip_move_s 동안 천천히 움직인 뒤 grip_wait_s 대기.
     서보는 현재 각도를 알려주지 않으므로 끝까지 열리고·닫히도록 시간을 넉넉히 준다 (성능 개선 때 줄인다).
     이번 실행에서 집게에 처음 보내는 명령이면 시작 각도를 몰라 바로 보내고, 그만큼 더 기다린다."""
-    target = cfg["grip"][state]
+    target = cfg["grip"][state] if angle is None else angle
     if "grip" in servo_angles:
         move_servos({"grip": target}, cfg["grip_move_s"])
     else:
@@ -381,10 +384,22 @@ def get_frame(fresh=False):
     return frame if ok else None
 
 
-def read_qrs(frame, budget_s=0.25):
+def read_qrs(frame, budget_s=0.25, expect_px=None):
     """frame 안의 QR들을 [(문자열, 중심x좌표), ...]로 돌려준다. 없으면 [].
-    흐리거나 대비가 낮아도 읽도록 여러 방법을 시도한다 (qr_read.py). budget_s = 한 프레임에 쓸 최대 시간"""
-    return qr_read.read_qrs(frame, budget_s)
+    흐리거나 대비가 낮아도 읽도록 여러 방법을 시도한다 (qr_read.py). budget_s = 한 프레임에 쓸 최대 시간
+    expect_px를 주면 화면 가운데를 그 크기에 맞게 확대해 먼저 읽는다 (expected_qr_px)"""
+    return qr_read.read_qrs(frame, budget_s, expect_px)
+
+
+def expected_qr_px(distance_cm):
+    """출발 QR이 distance_cm 앞에 있을 때 웹캠 화면에서 한 변이 몇 픽셀로 찍힐지 (핀홀 카메라 계산).
+    거리가 멀수록 작게 찍힌다: 픽셀 = 초점거리(px) × QR 크기(cm) / 거리(cm).
+    camera.hfov_deg(가로 화각)는 python3 hw.py qr 로 잰다. 거리를 모르면 None"""
+    if not distance_cm or distance_cm <= 0:
+        return None
+    c = cfg["camera"]
+    focal = ((frame_width or c["width"]) / 2) / math.tan(math.radians(c["hfov_deg"] / 2))
+    return focal * cfg["start_qr"]["size_cm"] / distance_cm
 
 
 # =====================================================================
@@ -467,9 +482,17 @@ if __name__ == "__main__":
                     print("프레임 없음 — 카메라 연결 확인", flush=True)
                     continue
                 t = time.monotonic()
-                qrs = read_qrs(frame)
+                qrs = qr_read.read_qrs_detail(frame, expect_px=expected_qr_px(last_distance or get_distance()))
                 took = (time.monotonic() - t) * 1000
-                print(f"[{elapsed():6.2f}s] {frame.shape[1]}x{frame.shape[0]} {took:4.0f}ms", qrs or "-", flush=True)
+                print(f"[{elapsed():6.2f}s] {frame.shape[1]}x{frame.shape[0]} {took:4.0f}ms",
+                      [(q[0], round(q[1])) for q in qrs] or "-", flush=True)
+                if qrs:
+                    # QR이 찍힌 크기와 초음파 거리로 웹캠 가로 화각을 거꾸로 계산 (config camera.hfov_deg에 넣는다)
+                    width_px, d = qrs[0][2], get_distance()
+                    focal = width_px * d / cfg["start_qr"]["size_cm"]
+                    hfov = math.degrees(2 * math.atan((frame.shape[1] / 2) / focal))
+                    print(f"           QR 한 변 {width_px:.0f}px · 거리 {d:.1f}cm → 가로 화각 약 {hfov:.0f}° "
+                          f"(설정 {cfg['camera']['hfov_deg']}°, 예상 크기 {expected_qr_px(d):.0f}px)", flush=True)
                 if qrs:
                     record_event("qr", {"qrs": qrs})
                 if time.monotonic() - last_snap > 1:

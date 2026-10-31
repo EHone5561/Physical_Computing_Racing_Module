@@ -66,6 +66,10 @@ def wait_start_qr():
     이 동안 바퀴는 움직이지 않는다.
     """
     sc = hw.cfg["start_qr"]
+    # 출발선에서 QR까지 거리로 QR이 찍힐 크기를 미리 계산해 그 크기에 맞춰 읽는다 (멀면 작게 찍힌다)
+    expect = hw.expected_qr_px(hw.last_distance or hw.get_distance())
+    if expect:
+        log(f"QR 예상 크기 {expect:.0f}px (거리 {hw.last_distance:.0f}cm)")
 
     # 이전 경기의 QR이 화면에 남아 있으면 바로 출발해 버린다 → 먼저 '빈 화면'을 확인
     if sc["require_blank_first"]:
@@ -75,7 +79,7 @@ def wait_start_qr():
             if frame is None:
                 continue
             # 빈 화면 확인은 빠르게 (느리게 읽다가 QR이 떠 버리면 '남아 있는 QR'로 오해한다)
-            if start_direction(hw.read_qrs(frame, budget_s=0.05)) is None:
+            if start_direction(hw.read_qrs(frame, budget_s=0.05, expect_px=expect)) is None:
                 blank += 1
             else:
                 blank = 0
@@ -90,7 +94,7 @@ def wait_start_qr():
         frame = hw.get_frame(fresh=True)
         if frame is None:
             continue
-        d = start_direction(hw.read_qrs(frame))
+        d = start_direction(hw.read_qrs(frame, expect_px=expect))
         if d is None:
             misses += 1
             if misses > sc.get("max_misses", 3):
@@ -150,6 +154,16 @@ class StallBoost:
         return self.extra * hw.cfg["motor"]["boost_brake_cm_per_pct"]
 
 
+def kick_start(d):
+    """멈춘 상태에서는 느린 출력으로 바퀴가 잘 안 구르므로, 처음 kick_s 동안 kick_speed로 밀어 출발시킨다.
+    이미 브레이크 거리 근처(15cm 이내)면 하지 않는다"""
+    m, st = hw.cfg["motor"], hw.cfg["stop"]
+    if m["kick_s"] <= 0 or d <= st["target_cm"] + st["brake_margin_cm"] + 15:
+        return
+    hw.drive(m["kick_speed"])
+    time.sleep(m["kick_s"])
+
+
 def steady_distance(n=5, gap_s=0.03):
     """멈춘 상태에서 여러 번 재서 중앙값 (튀는 값 하나에 흔들리지 않게)"""
     values = []
@@ -180,13 +194,15 @@ def drive_and_stop():
     last_print = 0.0
     filt = ApproachFilter(hw.get_distance())
     boost = StallBoost()
-    slow = False   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
+    slow, below = False, 0   # 한 번 감속 구간에 들어가면 값이 튀어도 다시 빨라지지 않는다
+    kick_start(filt.last)
     while True:
         d = filt.update(hw.get_distance())
         if d <= brake_at + boost.brake_lead():
             hw.stop()
             break
-        slow = slow or d <= st["slow_down_cm"]
+        below = below + 1 if d <= st["slow_down_cm"] else 0
+        slow = slow or below >= 2   # 두 번 연속일 때만 (값 하나 튄 것으로 감속 구간에 들어가지 않게)
         hw.drive(boost.speed(m["slow_speed"] if slow else m["max_speed"], d))
         if time.time() - last_print >= 0.1:          # 0.1초마다 속도·거리 출력
             hw.show_status("drive")

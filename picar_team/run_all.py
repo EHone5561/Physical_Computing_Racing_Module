@@ -135,11 +135,16 @@ def place(side, slot):
     carry = mission.pose(f"{side}_{slot}_carry")
     # 들어 올린 높이 그대로 base만 돌린다 (함께 움직이면 중간에 낮아져 옆 스펀지를 볼링처럼 친다)
     hw.move_servos({"base": carry["base"]}, ra["swing_move_s"])
-    move(f"{side}_{slot}_carry", slow=True)
     land = dict(mission.pose(f"{side}_{slot}_place"))
     for joint in ("arm", "wrist"):
         land[joint] = max(0, min(180, land[joint] + ra["place_press"][joint]))
+    # 놓을 칸 위 자세(_carry)를 지나 착지까지 같은 속도로 이어서 내려간다.
+    # 위 자세까지 천천히(carry_move_s) 갔다가 빠르게 내려가면 위에서 머뭇거리는 것처럼 보였다
+    def change(a, b):
+        return max(abs(b[j] - a.get(j, b[j])) for j in b)
     hw.set_phase(f"{side}_{slot}_land")
+    speed = max(1.0, change(carry, land)) / ra["place_move_s"]   # 착지 구간의 °/s
+    hw.move_servos(carry, change(hw.servo_angles, carry) / speed)
     hw.move_servos(land, ra["place_move_s"])
     time.sleep(ra["place_settle_s"])          # 팔 흔들림이 멎은 뒤 연다
     angle = ra["release_by_slot"].get(f"{side}_{slot}")   # 잘 안 놓이는 칸은 더 넓게 연다

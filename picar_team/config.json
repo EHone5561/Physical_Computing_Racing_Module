@@ -18,8 +18,8 @@
   "grip": { "open": 135, "close": 30, "release": 105 },
   "servo_move_time": 0.5,
   "servo_step_s": 0.02,
-  "grip_move_s": 0.8,
-  "grip_wait_s": 0.5,
+  "grip_move_s": 0.5,
+  "grip_wait_s": 0,
 
   "motor": {
     "channels": { "m1": [15, 14], "m2": [12, 13] },
@@ -67,8 +67,8 @@
     "reach_adjust": { "arm": 0, "wrist": 0 },
     "place_press": { "arm": 18, "wrist": 18 },
     "place_move_s": 0.4,
-    "place_settle_s": 0.4,
-    "release_hold_s": 0.6,
+    "place_settle_s": 0,
+    "release_hold_s": 0,
     "release_by_slot": { "right_back": 180, "left_front": 130 },
     "release_by_slot_reverse": { "right_front": 130, "left_back": 180 },
     "heading_fix_max_deg": 6,

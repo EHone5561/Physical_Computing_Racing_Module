@@ -114,7 +114,8 @@ def steer_for(heading, lateral):
     옆으로 밀렸으면 가운데 줄 쪽을 향하도록 목표 방향을 기울이고, 그 방향과의 차이만큼 꺾는다."""
     c, cc = hw.cfg, hw.cfg["centering"]
     limit = cc["max_heading_fix_deg"]
-    want = max(-limit, min(limit, -cc["lateral_gain_deg_per_cm"] * lateral))
+    # lateral_target_cm: 가운데 줄 대신 따라갈 줄 (음수 = 오른쪽). 팔이 겨우 닿는 쪽 상자로 조금 붙을 때 쓴다
+    want = max(-limit, min(limit, -cc["lateral_gain_deg_per_cm"] * (lateral - cc["lateral_target_cm"])))
     turn = cc["heading_gain"] * (heading - want)               # + 면 오른쪽으로 꺾어야 한다
     turn = max(-cc["steer_limit_deg"], min(cc["steer_limit_deg"], turn))
     return c["steer_center"] - cc["steer_sign"] * turn

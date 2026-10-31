@@ -51,6 +51,7 @@
     "steer_sign": -1,
     "heading_gain": 2.0,
     "lateral_gain_deg_per_cm": 1.5,
+    "lateral_target_cm": 0.0,
     "max_heading_fix_deg": 6,
     "steer_limit_deg": 15,
     "line_pins": { "left": 22, "middle": 27, "right": 17 }
@@ -96,7 +97,7 @@
     "left_back_carry":   { "base": 172, "arm": 121, "wrist": 115 },
     "left_back_place":   { "base": null, "arm": null, "wrist": null },
     "right_front_above": { "base": 22 , "arm": 159, "wrist": 144 },
-    "right_front_down":  { "base": 22 , "arm": 180, "wrist": 152 },
+    "right_front_down":  { "base": 22 , "arm": 180, "wrist": 156 },
     "right_front_carry": { "base": 22 , "arm": 137, "wrist": 150 },
     "right_front_place": { "base": null, "arm": null, "wrist": null },
     "right_back_above":  { "base": null, "arm": null, "wrist": null },

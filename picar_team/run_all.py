@@ -20,7 +20,9 @@ config.json
 - grip.open / grip.close: 반드시 실측해서 넣는다 (비어 있으면 실행하지 않는다)
 - run_all.wrist_flip: wrist 값을 올렸을 때 목이 내려가는 조립이면 true (모든 자세의 wrist를 180-값으로 바꿔 쓴다)
 - run_all.use_gyro: 자이로 직진 보정 사용 (실패하면 보정 없이 주행)
-- run_all.carry_move_s: 스펀지를 들고 들어 올리거나 위로 빠지는 한 동작의 시간
+- run_all.carry_move_s: 스펀지를 쥔 뒤 들어 올리는 한 동작의 시간
+- run_all.empty_move_dps: 빈손 이동(집으러 가기·내려가기, 놓고 위로 빠지기, 마지막 정리) 속도 °/s.
+  멈춤 없이 이어서 움직인다. 집으러 내려갈 때 스펀지를 밀면 낮춘다
 - run_all.swing_move_s: 스펀지를 든 채 반대쪽 칸 위로 회전하는 시간 (빠르면 흔들려 놓칠 수 있다)
 - run_all.place_press: 놓는 자세(_place)에 더해 착지 높이를 정하는 양. 공중에서 떨어지면 arm·wrist를 같이 +3씩
 - run_all.place_move_s: 들어 올린 높이에서 착지 높이까지 내려가는 시간 (짧을수록 빠르게)
@@ -112,13 +114,26 @@ def move(name, slow=False):
     hw.move_servos(mission.pose(name), hw.cfg["run_all"]["carry_move_s"] if slow else None)
 
 
+def change(a, b):
+    """a 자세에서 b 자세까지 가장 많이 움직이는 관절의 각도 차"""
+    return max(abs(b[j] - a.get(j, b[j])) for j in b)
+
+
+def glide(target, name=None):
+    """빈손 이동: 멈춤 없이 empty_move_dps(°/s) 일정한 속도로 간다. 연달아 부르면 끊기지 않고 이어진다.
+    짧은 거리도 같은 속도라 빨리 끝나고, 먼 거리는 servo_move_time보다 느려지지 않는다"""
+    if name:
+        hw.set_phase(name)
+    d = change(hw.servo_angles, target) / hw.cfg["run_all"]["empty_move_dps"]
+    hw.move_servos(target, min(hw.cfg["servo_move_time"], d))
+
+
 def pick(side, slot):
     """위로 가면서 열기 → 내려감 → 닫기 → 들어 올림. 들어 올릴 때부터는 스펀지를 들고 있으니 천천히.
     집게를 위 자세로 가는 동작과 함께 열어, 위에서 열기를 기다리며 멈추는 시간을 없앤다."""
     name = f"{side}_{slot}_above"
-    hw.set_phase(name)
-    hw.move_servos({**mission.pose(name), "grip": hw.cfg["grip"]["open"]})
-    move(f"{side}_{slot}_down")
+    glide({**mission.pose(name), "grip": hw.cfg["grip"]["open"]}, name)
+    glide(mission.pose(f"{side}_{slot}_down"), f"{side}_{slot}_down")   # 위에서 멈추지 않고 이어서 내려간다
     hw.grip("close")
     move(f"{side}_{slot}_carry", slow=True)
     mission.log(f"{side} {slot} 집기 완료")
@@ -140,8 +155,6 @@ def place(side, slot):
         land[joint] = max(0, min(180, land[joint] + ra["place_press"][joint]))
     # 놓을 칸 위 자세(_carry)를 지나 착지까지 같은 속도로 이어서 내려간다.
     # 위 자세까지 천천히(carry_move_s) 갔다가 빠르게 내려가면 위에서 머뭇거리는 것처럼 보였다
-    def change(a, b):
-        return max(abs(b[j] - a.get(j, b[j])) for j in b)
     hw.set_phase(f"{side}_{slot}_land")
     speed = max(1.0, change(carry, land)) / ra["place_move_s"]   # 착지 구간의 °/s
     hw.move_servos(carry, change(hw.servo_angles, carry) / speed)
@@ -150,7 +163,7 @@ def place(side, slot):
     angle = ra["release_by_slot"].get(f"{side}_{slot}")   # 잘 안 놓이는 칸은 더 넓게 연다
     hw.grip("release", angle)
     time.sleep(ra["release_hold_s"])          # 집게에 붙은 스펀지가 떨어질 때까지 연 채로 기다린다
-    move(f"{side}_{slot}_carry", slow=True)
+    glide(carry, f"{side}_{slot}_up")         # 빈손이라 빠르게 위로 빠진다. 다음 동작이 바로 이어진다
     mission.log(f"{side} {slot} 놓기 완료")
 
 
@@ -163,7 +176,7 @@ def move_objects(first):
     place(second, place_second)
     pick(second, mission.other_slot(place_second))
     place(first, place_first)
-    move("drive")   # 팔을 정리한 자세로
+    glide(mission.pose("drive"), "drive")   # 팔을 정리한 자세로 (위로 빠진 뒤 멈추지 않고 이어서)
 
 
 # =====================================================================

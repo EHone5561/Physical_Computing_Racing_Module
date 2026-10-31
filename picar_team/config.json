@@ -44,7 +44,8 @@
     "slow_down_cm": 60.0,
     "brake_margin_cm": 3.0,
     "tolerance_cm": 0.25,
-    "settle_s": 0.3,
+    "tolerance_far_cm": 0.5,
+    "settle_s": 0.2,
     "fine_max_tries": 6
   },
 

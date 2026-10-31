@@ -229,7 +229,9 @@ def fine_adjust():
         d = steady_distance()
         err = d - target
         hw.show_status("fine")
-        if abs(err) <= st["tolerance_cm"]:
+        # 모니터 쪽(가까운 쪽)은 tolerance_cm만, 먼 쪽은 tolerance_far_cm까지 봐준다.
+        # 빨간 구간(29~31cm)은 먼 쪽으로 여유가 많아, 조금 멀게 멈춘 것을 다시 맞추느라 시간을 쓰지 않는다
+        if -st["tolerance_cm"] <= err <= st.get("tolerance_far_cm", st["tolerance_cm"]):
             break
         # 지난 펄스에 거의 안 움직였으면 (멈춘 상태에서는 바퀴가 잘 안 구른다) 출력을 올린다
         if before is not None and abs(d - before) < 0.3 and speed < m["fine_speed"] + m["stall_max_extra"]:
